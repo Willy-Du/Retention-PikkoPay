@@ -23,7 +23,6 @@ date_start = datetime(2024, 6, 10, 0, 0, 0)
 date_end = datetime.now()
 store_id = ObjectId("65e6388eb6667e3400b5b8d8")
 
-# 📌 Pipeline pour récupérer les nouveaux utilisateurs (basé sur `firstPaidAt`)
 pipeline_new_users = [
     {"$unwind": "$receipt"},
     {"$match": {
@@ -31,11 +30,20 @@ pipeline_new_users = [
         "receipt.storeId": store_id,
         "receipt.paidAt": {"$gte": date_start, "$lte": date_end}
     }},
-    {"$sort": {"receipt.paidAt": 1}},  # Trier par date de paiement croissante
+    {"$sort": {"receipt.paidAt": 1}},
     {"$group": {
         "_id": "$_id",
         "firstPaidAt": {"$first": "$receipt.paidAt"},
         "createdAt": {"$first": "$createdAt"}
+    }},
+    {"$match": {
+        # Filtre pour garder seulement les utilisateurs dont la date de création est dans la même semaine ISO que leur premier paiement
+        "$expr": {
+            "$and": [
+                {"$eq": [{"$isoWeekYear": "$firstPaidAt"}, {"$isoWeekYear": "$createdAt"}]},
+                {"$eq": [{"$isoWeek": "$firstPaidAt"}, {"$isoWeek": "$createdAt"}]}
+            ]
+        }
     }},
     {"$group": {
         "_id": {"year": {"$isoWeekYear": "$firstPaidAt"}, "week": {"$isoWeek": "$firstPaidAt"}},
@@ -106,10 +114,7 @@ for index, row in df_new_users.iterrows():
         continue
 
     future_weeks = df_active_users.loc[df_active_users.index > index]
-    for week_diff, (future_index, future_row) in enumerate(future_weeks.iterrows()):
-        if week_diff == 0:
-            continue
-        
+    for week_diff, (future_index, future_row) in enumerate(future_weeks.iterrows(), 1):  # Commencer l'énumération à 1 au lieu de 0
         future_users = future_row['active_users']
         retained_users = len(new_user_set.intersection(future_users)) if isinstance(future_users, set) else 0
         user_retention[index][f"+{week_diff}"] = retained_users
@@ -126,19 +131,18 @@ for col in df_percentage.columns:
     if col.startswith("+") and col != "+0":
         df_percentage[col] = (df_percentage[col] / df_percentage["+0"] * 100).round(1)
 
-# 📌 Assurer que toutes les courbes commencent à 100% 
+# 📌 Fixer +0 à 100% (s'assurer que la colonne +0 ne perturbe pas les autres calculs)
 df_percentage["+0"] = 100
 
-# 📌 Générer une liste complète de semaines dans la période étudiée
-all_weeks = pd.date_range(start=df_percentage.index.min(), end=df_percentage.index.max(), freq='W-MON')
+# 📌 Calculer les pourcentages pour les autres colonnes
+for col in df_percentage.columns:
+    if col.startswith("+") and col != "+0":
+        df_percentage[col] = (df_percentage[col] / df_percentage["+0"] * 100).round(1)
 
-# 📌 Réindexer le DataFrame pour inclure toutes les semaines (même celles sans données)
-df_percentage = df_percentage.reindex(all_weeks)
+# 📌 Réindexer et remplir les valeurs manquantes avec NaN
+df_percentage = df_percentage.sort_index()  # Assurez-vous que l'index est trié correctement
 
-# 📌 Remplir les valeurs manquantes avec NaN (éviter les erreurs dans les calculs)
-df_percentage = df_percentage.sort_index()
-# 📌 Affichage dans Streamlit
-st.title("📊 Tableau de rétention hebdomadaire (%)")
+# 📌 Appliquer le dégradé de rouge
 def apply_red_gradient(val):
     """ Accentue le dégradé de rouge : rouge foncé pour 100%, blanc pour 0% """
     if pd.notna(val):
