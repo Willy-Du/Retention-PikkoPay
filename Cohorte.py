@@ -24,6 +24,7 @@ date_start = datetime(2024, 6, 10, 0, 0, 0)
 date_end = datetime.now()
 store_id = ObjectId("65e6388eb6667e3400b5b8d8")
 
+
 pipeline_new_users = [
     {"$unwind": "$receipt"},
     {"$match": {
@@ -68,7 +69,6 @@ pipeline_active_users = [
     }},
     {"$sort": {"_id.year": 1, "_id.week": 1}}
 ]
-
 # 📌 Exécuter les requêtes MongoDB
 cursor_new_users = users_collection.aggregate(pipeline_new_users)
 cursor_active_users = users_collection.aggregate(pipeline_active_users)
@@ -104,18 +104,35 @@ df_active_users['active_users'] = df_active_users['active_users'].apply(lambda u
 df_new_users = df_new_users.sort_values(by='week_start').set_index('week_start')
 df_active_users = df_active_users.sort_values(by='week_start').set_index('week_start')
 
+# 📌 Générer la liste complète des semaines entre la première et la dernière
+all_weeks = pd.date_range(start=df_new_users.index.min(), end=df_new_users.index.max(), freq='W-MON')
+
+# 📌 Créer un DataFrame pour toutes les semaines avec la colonne total_new_users initialisée à 0
+all_weeks_df = pd.DataFrame(index=all_weeks)
+all_weeks_df['total_new_users'] = 0
+
+# 📌 Mettre à jour les valeurs pour les semaines qui ont des données
+for idx in df_new_users.index:
+    if idx in all_weeks_df.index:
+        all_weeks_df.loc[idx, 'total_new_users'] = df_new_users.loc[idx, 'total_new_users']
+
 # 📌 Calcul de rétention
 user_retention = {}
 
+# 📌 Initialiser toutes les semaines avec +0 = 0 par défaut
+for idx in all_weeks:
+    user_retention[idx] = {"+0": 0}
+
+# 📌 Mettre à jour les données de rétention pour les semaines avec de nouveaux utilisateurs
 for index, row in df_new_users.iterrows():
     new_user_set = row['new_users']
-    user_retention[index] = {"+0": len(new_user_set)}
+    user_retention[index]["+0"] = len(new_user_set)
 
     if not new_user_set:
         continue
 
     future_weeks = df_active_users.loc[df_active_users.index > index]
-    for week_diff, (future_index, future_row) in enumerate(future_weeks.iterrows(), 1):  # Commencer l'énumération à 1 au lieu de 0
+    for week_diff, (future_index, future_row) in enumerate(future_weeks.iterrows(), 1):
         future_users = future_row['active_users']
         retained_users = len(new_user_set.intersection(future_users)) if isinstance(future_users, set) else 0
         user_retention[index][f"+{week_diff}"] = retained_users
@@ -123,38 +140,93 @@ for index, row in df_new_users.iterrows():
 # 📌 Convertir les données de rétention en DataFrame
 df_retention = pd.DataFrame.from_dict(user_retention, orient='index')
 
-# 📌 Fusion avec `df_new_users`
-df_final = df_new_users[['total_new_users']].merge(df_retention, left_index=True, right_index=True, how='left')
+# 📌 S'assurer que toutes les colonnes +N existent et sont remplies avec des 0 si nécessaire
+max_week_diff = max([int(col.replace("+", "")) for col in df_retention.columns if col.startswith("+")])
+for week_diff in range(max_week_diff + 1):
+    col_name = f"+{week_diff}"
+    if col_name not in df_retention.columns:
+        df_retention[col_name] = 0
+    else:
+        df_retention[col_name] = df_retention[col_name].fillna(0)
 
-# Tranformer %
-df_percentage = df_final.copy()
+# 📌 Fusion avec le DataFrame de toutes les semaines
+df_numeric = all_weeks_df.merge(df_retention, left_index=True, right_index=True, how='left')
+
+# 📌 Définir la date actuelle pour déterminer quelles semaines sont dans le futur
+current_date = datetime.now()
+current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
+
+# 📌 Déterminer la dernière semaine disponible pour chaque cohorte
+last_available_week = {}
+for index, row in df_numeric.iterrows():
+    plus_columns = [col for col in df_numeric.columns if col.startswith("+")]
+    plus_columns.sort(key=lambda x: int(x.replace("+", "")))
+    
+    last_week = 0
+    for col in plus_columns:
+        week_num = int(col.replace("+", ""))
+        future_week = index + pd.Timedelta(weeks=week_num)
+        
+        # Si la semaine est dans le futur par rapport à aujourd'hui, arrêter
+        if future_week > current_week_start:
+            break
+        last_week = week_num
+    
+    last_available_week[index] = last_week
+
+# 📌 Remplacer les valeurs NaN par 0 pour les colonnes passées et actuelles, et laisser None pour les semaines futures
+for index, row in df_numeric.iterrows():
+    plus_columns = [col for col in df_numeric.columns if col.startswith("+")]
+    plus_columns.sort(key=lambda x: int(x.replace("+", "")))
+    
+    max_week = last_available_week[index]
+    
+    for col in plus_columns:
+        week_num = int(col.replace("+", ""))
+        if week_num <= max_week:
+            # Remplacer par 0 uniquement si la semaine est dans le passé ou actuelle
+            if pd.isna(row[col]):
+                df_numeric.at[index, col] = 0
+        else:
+            # Pour les semaines futures, mettre explicitement à None
+            df_numeric.at[index, col] = None
+
+# 📌 Création d'une copie pour les pourcentages
+df_percentage = df_numeric.copy()
+
+# 📌 Calculer les pourcentages uniquement pour les données disponibles (non None)
 for col in df_percentage.columns:
     if col.startswith("+") and col != "+0":
-        df_percentage[col] = (df_percentage[col] / df_percentage["+0"] * 100).round(1)
+        # Pour éviter la division par zéro et ne calculer que pour les valeurs non-None
+        mask = (df_percentage["+0"] > 0) & (df_percentage[col].notna())
+        df_percentage.loc[mask, col] = (df_percentage.loc[mask, col] / df_percentage.loc[mask, "+0"] * 100).round(1)
 
-# 📌 Fixer +0 à 100% (s'assurer que la colonne +0 ne perturbe pas les autres calculs)
-df_percentage["+0"] = 100
+# 📌 Fixer +0 à 100% où il y a des utilisateurs, et 0% ailleurs
+df_percentage["+0"] = df_percentage["+0"].apply(lambda x: 100 if x > 0 else 0)
 
-# 📌 Calculer les pourcentages pour les autres colonnes
-for col in df_percentage.columns:
-    if col.startswith("+") and col != "+0":
-        df_percentage[col] = (df_percentage[col] / df_percentage["+0"] * 100).round(1)
-
-# 📌 Réindexer et remplir les valeurs manquantes avec NaN
-df_percentage = df_percentage.sort_index()  # Assurez-vous que l'index est trié correctement
-
-# 📌 Appliquer le dégradé de rouge
-def apply_red_gradient(val):
-    """ Accentue le dégradé de rouge : rouge foncé pour 100%, blanc pour 0% """
-    if pd.notna(val):
+# 📌 Appliquer le dégradé de rouge pour la coloration des cellules avec traitement spécial pour les cellules futures
+def apply_red_gradient_with_future(val):
+    """ 
+    Applique un dégradé de rouge pour les valeurs disponibles
+    et masque les cellules correspondant aux semaines futures
+    """
+    if pd.isna(val):
+        # Style pour les semaines futures non disponibles
+        return 'background-color: #f0f0f0; color: #f0f0f0;'
+    elif pd.notna(val):
+        # Dégradé de rouge pour les valeurs disponibles
         intensity = int(255 * ((1 - val / 100) ** 3))  # Exposant pour un meilleur contraste
         return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
     return ''
+
+# 📌 Afficher le tableau avec les valeurs numériques et les pourcentages avec le dégradé
 st.header("📅 Tableau des cohortes hebdomadaires")
 st.subheader("📊 Cohorte hebdomadaire (valeurs numériques)")
-st.dataframe(df_final)
+# On utilise df_numeric pour le premier tableau
+st.dataframe(df_numeric)
 st.subheader("📊 Cohorte hebdomadaire (%)")
-st.dataframe(df_percentage.style.applymap(apply_red_gradient, subset=[col for col in df_percentage.columns if col.startswith("+")]))
+# On utilise df_percentage pour le deuxième tableau avec coloration et gestion des semaines futures
+st.dataframe(df_percentage.style.applymap(apply_red_gradient_with_future, subset=[col for col in df_percentage.columns if col.startswith("+")]))
 
 
 # 📌 Ajout du Line Chart
