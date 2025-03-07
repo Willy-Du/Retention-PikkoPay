@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 import streamlit as st
 import plotly.graph_objects as go
 import matplotlib.cm as cm
@@ -7,14 +8,18 @@ import matplotlib
 from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
+from dotenv import load_dotenv
+
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI")
 
 # 📌 Connexion MongoDB
-client = MongoClient("mongodb://admin:mnNUDrI6QqC291GAFR7E@node1-865a0dde96634d60.database.cloud.ovh.net,node2-865a0dde96634d60.database.cloud.ovh.net,node3-865a0dde96634d60.database.cloud.ovh.net/admin?replicaSet=replicaset&tls=true")
+client = MongoClient(MONGO_URI)
 db = client['storesDatabase']
 users_collection = db['usertests']
 
 # 📌 Définition de la période
-date_start = datetime(2024, 6, 1, 0, 0, 0)
+date_start = datetime(2024, 6, 10, 0, 0, 0)
 date_end = datetime.now()
 store_id = ObjectId("65e6388eb6667e3400b5b8d8")
 
