@@ -18,6 +18,7 @@ client = MongoClient(MONGO_URI)
 db = client['storesDatabase']
 users_collection = db['usertests']
 
+
 # 📌 Définition de la période
 date_start = datetime(2024, 6, 10, 0, 0, 0)
 date_end = datetime.now()
@@ -149,9 +150,11 @@ def apply_red_gradient(val):
         intensity = int(255 * ((1 - val / 100) ** 3))  # Exposant pour un meilleur contraste
         return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
     return ''
-
+st.header("📅 Tableau des cohortes hebdomadaires")
+st.subheader("📊 Cohorte hebdomadaire (valeurs numériques)")
+st.dataframe(df_final)
+st.subheader("📊 Cohorte hebdomadaire (%)")
 st.dataframe(df_percentage.style.applymap(apply_red_gradient, subset=[col for col in df_percentage.columns if col.startswith("+")]))
-
 
 
 # 📌 Ajout du Line Chart
@@ -323,7 +326,7 @@ df_monthly_retention = pd.DataFrame.from_dict(monthly_retention, orient='index')
 df_final = df_new_users[['total_new_users']].merge(df_monthly_retention, left_index=True, right_index=True, how='left')
 
 # ✅ Afficher les valeurs absolues (sans style)
-st.subheader("📊 Cohortes mensuelles (valeurs absolues)")
+st.subheader("📊 Cohortes mensuelles (valeurs numériques)")
 st.dataframe(df_final)
 
 # ✅ Calculer les pourcentages de rétention **en utilisant les valeurs absolues d'origine**
