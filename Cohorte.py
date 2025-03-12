@@ -28,6 +28,8 @@ date_start = datetime(2024, 6, 10, 0, 0, 0)
 date_end = datetime.now()
 store_id = ObjectId("65e6388eb6667e3400b5b8d8")
 
+
+
 # 📌 Ajout du menu de navigation dans la barre latérale
 st.sidebar.title("📊 Dashboard de suivi")
 page = st.sidebar.radio(
