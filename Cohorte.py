@@ -12,6 +12,7 @@ from pymongo import MongoClient
 from bson import ObjectId
 from dotenv import load_dotenv
 
+
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 # Vérifier si la connexion MongoDB est déjà stockée dans `st.session_state`
