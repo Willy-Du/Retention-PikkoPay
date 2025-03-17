@@ -708,7 +708,7 @@ if page == "Rétention":
     # 5) Afficher tous les mois de la plage, même s'ils sont à 0
     # ----------------------------
 
-    # a) Générer la liste complète des mois (freq='MS' => début de mois)
+    # a) Générer la liste complète des mois
     today = datetime.now()
     first_day_current_month = datetime(today.year, today.month, 1)
     last_month_completed = first_day_current_month - pd.DateOffset(months=1)
@@ -717,48 +717,41 @@ if page == "Rétention":
     all_months_df = pd.DataFrame(index=all_months_range)
     all_months_df['total_new_users'] = 0  # Valeur par défaut
 
-    # b) Fusionner pour forcer l'affichage de tous les mois
+    # b) Fusionner pour inclure tous les mois
     df_merged = all_months_df.merge(df_final, left_index=True, right_index=True, how='left', suffixes=('', '_old'))
 
-    # Récupérer la bonne valeur de total_new_users
+    # Récupérer les bonnes valeurs de total_new_users
     if 'total_new_users_old' in df_merged.columns:
         df_merged['total_new_users'] = df_merged['total_new_users_old'].fillna(df_merged['total_new_users'])
         df_merged.drop(columns=['total_new_users_old'], inplace=True)
 
     df_final = df_merged
 
-    # c) Calcul dynamique du global_max (écart cohorte - dernier mois terminé uniquement)
-    today = datetime.now()
-    first_day_current_month = datetime(today.year, today.month, 1)
-    last_month_completed = first_day_current_month - pd.DateOffset(months=1)
+    # c) Recalcul complet de global_max
+    # Nombre maximum de mois possibles entre la plus ancienne cohorte et aujourd'hui
+    oldest_cohort = df_final.index.min() if not df_final.empty else first_day_current_month
+    months_diff = (last_month_completed.year - oldest_cohort.year) * 12 + (last_month_completed.month - oldest_cohort.month)
+    global_max = months_diff
 
-    global_max = min([
-        (first_day_current_month.year - cohort_date.year) * 12 + (first_day_current_month.month - cohort_date.month) - 1
-        for cohort_date in df_final.index
-    ])
-
-
-    # Dynamique : On ajuste global_max selon les données réellement présentes dans df_monthly_retention
-    max_offset_existing = df_monthly_retention.columns.str.extract(r'\+(\d+)').astype(float).max().max()
-    global_max = min(global_max, int(max(0, max_offset_existing if (max_offset_existing := max([int(col[1:]) for col in df_monthly_retention.columns if col.startswith('+')], default=0)) else 0)))
-
-    # d) Ajouter les colonnes +0, +1, ..., +global_max uniquement
+    # d) Recréer toutes les colonnes +0 à +global_max
     for offset in range(global_max + 1):
         col_name = f"+{offset}"
         if col_name not in df_final.columns:
             df_final[col_name] = None
 
-    # e) Remplir les valeurs : on remplit 0 pour les mois complets (inférieurs au mois en cours)
+    # e) Remplir TOUTES les valeurs manquantes avec 0 pour les périodes passées
     for index, row in df_final.iterrows():
+        cohort_date = index
         for offset in range(global_max + 1):
             col_name = f"+{offset}"
-            future_month = index + pd.DateOffset(months=offset)
-            if future_month < first_day_current_month:
-                if pd.isna(row[col_name]):
+            future_date = cohort_date + pd.DateOffset(months=offset)
+            
+            # Si le mois est passé (jusqu'au mois dernier inclus), on doit avoir une valeur
+            if future_date <= last_month_completed:
+                # Vérifier si la valeur existe déjà et n'est pas nulle
+                current_value = df_final.at[index, col_name]
+                if pd.isna(current_value):
                     df_final.at[index, col_name] = 0
-            else:
-                df_final.at[index, col_name] = None
-
 
     # ----------------------------
     # 6) Affichage des cohortes mensuelles (valeurs numériques)
