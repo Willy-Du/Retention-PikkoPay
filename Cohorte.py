@@ -236,7 +236,7 @@ if page == "Rétention":
             {"$sort": {"_id.year": 1, "_id.week": 1}}
         ]
 
-    # Exécuter les requêtes MongoDB
+# Exécuter les requêtes MongoDB
     cursor_new_users_week = st.session_state.users_collection.aggregate(pipeline_new_users_week)
     cursor_active_users_week = st.session_state.users_collection.aggregate(pipeline_active_users_week)
 
@@ -270,8 +270,12 @@ if page == "Rétention":
     df_new_users_week = df_new_users_week.sort_values(by='week_start').set_index('week_start')
     df_active_users_week = df_active_users_week.sort_values(by='week_start').set_index('week_start')
 
-    # Générer la liste complète des semaines (plage hebdomadaire)
-    all_weeks_range = pd.date_range(start=date_start, end=datetime.now(), freq='W-MON')
+    # Définir la date actuelle et le début de la semaine courante
+    current_date = datetime.now()
+    current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
+
+    # Générer la liste complète des semaines (plage hebdomadaire), en excluant la semaine en cours
+    all_weeks_range = pd.date_range(start=date_start, end=current_week_start - pd.Timedelta(days=1), freq='W-MON')
 
     # Créer un DataFrame pour toutes les semaines avec la colonne total_new_users initialisée à 0
     all_weeks_df = pd.DataFrame(index=all_weeks_range)
@@ -299,14 +303,16 @@ if page == "Rétention":
         week_retention = {}
         
         # Combiner les indices de all_weeks_range et df_new_users_week pour éviter les KeyError
-        all_cohort_dates = set(all_weeks_range) | set(df_new_users_week.index)
+        # Exclure tous les index supérieurs ou égaux à la semaine en cours
+        filtered_df_new_users_week = df_new_users_week[df_new_users_week.index < current_week_start]
+        all_cohort_dates = set(all_weeks_range) | set(filtered_df_new_users_week.index)
         
         # Pour chaque date de la plage complète, initialiser la colonne "+0" à 0
         for idx in all_cohort_dates:
             week_retention[idx] = {"+0": 0}
         
         # Pour chaque cohorte (déterminée dans df_new_users_week), calculer la rétention
-        for index, row in df_new_users_week.iterrows():
+        for index, row in filtered_df_new_users_week.iterrows():
             new_user_set = row['new_users']
             week_retention[index]["+0"] = len(new_user_set)
             
@@ -314,9 +320,10 @@ if page == "Rétention":
             if not new_user_set:
                 continue
         
-            # Sélectionner les semaines actives postérieures à la date de cohorte
+            # Sélectionner les semaines actives postérieures à la date de cohorte, mais avant la semaine en cours
             if not df_active_users_week.empty:
-                future_weeks = df_active_users_week.loc[df_active_users_week.index > index]
+                future_weeks = df_active_users_week.loc[(df_active_users_week.index > index) & 
+                                                       (df_active_users_week.index < current_week_start)]
                 for future_index, future_row in future_weeks.iterrows():
                     # Calcul du décalage réel en semaines
                     week_diff = (future_index - index).days // 7
@@ -327,27 +334,24 @@ if page == "Rétention":
         # Conversion du dictionnaire en DataFrame
         df_retention_week = pd.DataFrame.from_dict(week_retention, orient='index')
         
-        # Définir la date actuelle et le début de la semaine courante
-        current_date = datetime.now()
-        current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
-        
         # Calculer l'horizon global : pour chaque cohorte, le nombre maximal de semaines possibles
+        # Exclure la semaine en cours
         global_max = 0
         for index in df_retention_week.index:
-            # Calcul du nombre de semaines écoulées entre la cohorte et la semaine courante
-            possible = (current_week_start - index).days // 7
+            # Calcul du nombre de semaines écoulées entre la cohorte et la semaine précédente
+            possible = (current_week_start - pd.Timedelta(days=7) - index).days // 7
             if possible > global_max:
                 global_max = possible
         
         # Pour chaque cohorte, s'assurer que les colonnes de "+0" jusqu'à "+global_max" existent
         # et appliquer la logique suivante :
-        # - Si la date (cohorte + N semaines) est dans le futur ( > current_week_start), la valeur doit rester None (NaN)
+        # - Si la date (cohorte + N semaines) est dans le futur ou dans la semaine en cours, la valeur doit rester None (NaN)
         # - Sinon, si aucune valeur n'existe, on remplit avec 0.
         for index, row in df_retention_week.iterrows():
             for week_diff in range(global_max + 1):
                 col_name = f"+{week_diff}"
                 future_week = index + pd.Timedelta(weeks=week_diff)
-                if future_week > current_week_start:
+                if future_week >= current_week_start:
                     df_retention_week.at[index, col_name] = None
                 else:
                     # S'il n'existe pas encore ou si la valeur est NaN, on met 0
@@ -359,9 +363,9 @@ if page == "Rétention":
         all_weeks_df['total_new_users'] = 0
         
         # Mettre à jour les valeurs pour les semaines disposant de données
-        for idx in df_new_users_week.index:
+        for idx in filtered_df_new_users_week.index:
             if idx in all_weeks_df.index:
-                all_weeks_df.loc[idx, 'total_new_users'] = df_new_users_week.loc[idx, 'total_new_users']
+                all_weeks_df.loc[idx, 'total_new_users'] = filtered_df_new_users_week.loc[idx, 'total_new_users']
         
         # ========================================
         # Fusion avec le DataFrame de toutes les semaines
@@ -403,12 +407,11 @@ if page == "Rétention":
     st.dataframe(df_numeric_week)
     st.subheader("📊 Tableau des cohortes hebdomadaires (%)")
     st.dataframe(df_percentage_week.style.applymap(apply_red_gradient_with_future, subset=[col for col in df_percentage_week.columns if col.startswith("+")]))
-
+    
     # Calcul de la diagonale pour la semaine cible
-
     today = pd.Timestamp.today()
     # Calcul du début de la semaine (lundi) et normalisation à minuit
-    target_week = (today - pd.Timedelta(days=today.weekday())).normalize()
+    target_week = (today - pd.Timedelta(weeks=1)).normalize()  # ✅ Prend la semaine précédente
 
     # Si l'index de df_active_users_week est un PeriodIndex, convertir target_week en période
     if isinstance(df_active_users_week.index, pd.PeriodIndex):
@@ -667,6 +670,12 @@ if page == "Rétention":
     df_new_users = df_new_users.sort_values(by='month_start').set_index('month_start')
     df_active_users = df_active_users.sort_values(by='month_start').set_index('month_start')
 
+    today = datetime.now()
+    first_day_current_month = datetime(today.year, today.month, 1)
+    df_new_users = df_new_users[df_new_users.index < first_day_current_month]
+    df_active_users = df_active_users[df_active_users.index < first_day_current_month]
+
+
     # ----------------------------
     # 4) Calcul de la rétention mensuelle
     # ----------------------------
@@ -696,12 +705,16 @@ if page == "Rétention":
         df_monthly_retention, left_index=True, right_index=True, how='left'
     )
 
-
     # ----------------------------
     # 5) Afficher tous les mois de la plage, même s'ils sont à 0
     # ----------------------------
+
     # a) Générer la liste complète des mois (freq='MS' => début de mois)
-    all_months_range = pd.date_range(start=date_start, end=datetime.now(), freq='MS')
+    today = datetime.now()
+    first_day_current_month = datetime(today.year, today.month, 1)
+    last_month_completed = first_day_current_month - pd.DateOffset(months=1)
+
+    all_months_range = pd.date_range(start=date_start, end=last_month_completed, freq='MS')
     all_months_df = pd.DataFrame(index=all_months_range)
     all_months_df['total_new_users'] = 0  # Valeur par défaut
 
@@ -715,31 +728,38 @@ if page == "Rétention":
 
     df_final = df_merged
 
-    # c) Calcul du global_max (plus grand décalage possible entre la cohorte et le mois courant)
-    current_date = datetime.now()
-    current_month_start = datetime(current_date.year, current_date.month, 1)
-    global_max = 0
-    for cohort_date in df_final.index:
-        offset = (current_month_start.year - cohort_date.year) * 12 + (current_month_start.month - cohort_date.month)
-        if offset > global_max:
-            global_max = offset
+    # c) Calcul dynamique du global_max (écart cohorte - dernier mois terminé uniquement)
+    today = datetime.now()
+    first_day_current_month = datetime(today.year, today.month, 1)
+    last_month_completed = first_day_current_month - pd.DateOffset(months=1)
 
-    # d) Ajouter les colonnes +0, +1, ..., +global_max si elles n'existent pas
+    global_max = min([
+        (first_day_current_month.year - cohort_date.year) * 12 + (first_day_current_month.month - cohort_date.month) - 1
+        for cohort_date in df_final.index
+    ])
+
+
+    # Dynamique : On ajuste global_max selon les données réellement présentes dans df_monthly_retention
+    max_offset_existing = df_monthly_retention.columns.str.extract(r'\+(\d+)').astype(float).max().max()
+    global_max = min(global_max, int(max(0, max_offset_existing if (max_offset_existing := max([int(col[1:]) for col in df_monthly_retention.columns if col.startswith('+')], default=0)) else 0)))
+
+    # d) Ajouter les colonnes +0, +1, ..., +global_max uniquement
     for offset in range(global_max + 1):
         col_name = f"+{offset}"
         if col_name not in df_final.columns:
             df_final[col_name] = None
 
-    # e) Remplir les valeurs 0 pour les mois passés ou égaux, None pour le futur
+    # e) Remplir les valeurs : on remplit 0 pour les mois complets (inférieurs au mois en cours)
     for index, row in df_final.iterrows():
         for offset in range(global_max + 1):
             col_name = f"+{offset}"
             future_month = index + pd.DateOffset(months=offset)
-            if future_month <= current_month_start:
+            if future_month < first_day_current_month:
                 if pd.isna(row[col_name]):
                     df_final.at[index, col_name] = 0
             else:
                 df_final.at[index, col_name] = None
+
 
     # ----------------------------
     # 6) Affichage des cohortes mensuelles (valeurs numériques)
