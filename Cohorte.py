@@ -447,7 +447,7 @@ if page == "Rétention":
     else:
         unique_users_target = 0
 
-    st.write(f"Utilisateurs uniques de la semaine cible (hebdomadaire): {unique_users_target}")
+    st.write(f"Somme de la diagonale (hebdomadaire): {diagonal_sum}")
 
     st.header("📈 Évolution du pourcentage d'utilisateurs par cohorte (hebdomadaire)")
 
