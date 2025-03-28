@@ -132,9 +132,9 @@ page = st.sidebar.radio(
     ["Rétention", "Acquisition", "Active Users", "Bug Report"]
 )
 
-# ========================
-# Partie Rétention
-# ========================
+# ------------------------------------------------------
+# Partie Rétention Hebdomadaire Utilisateurs Connectés 
+# ------------------------------------------------------
 if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_view == "Hebdomadaire":
 
             if selected_payment_method == "Tous":
@@ -254,7 +254,7 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                     {"$sort": {"_id.year": 1, "_id.week": 1}}
                 ]
 
-        # Exécuter les requêtes MongoDB
+            # Exécuter les requêtes MongoDB
             cursor_new_users_week = st.session_state.users_collection.aggregate(pipeline_new_users_week)
             cursor_active_users_week = st.session_state.users_collection.aggregate(pipeline_active_users_week)
 
@@ -304,19 +304,15 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                 if idx in all_weeks_df.index:
                     all_weeks_df.loc[idx, 'total_new_users'] = df_new_users_week.loc[idx, 'total_new_users']
 
-        # ====================================
-        # Calcul de la rétention hebdomadaire
-        # ====================================
+        # ------------------------------------------------------------
+        # Calcul de la rétention hebdomadaire Utilisateurs Connectés
+        # ------------------------------------------------------------
 
             if df_new_users_week.empty:
                 st.warning("Aucun nouvel utilisateur trouvé pour ce mode de paiement.")
                 df_numeric_week = pd.DataFrame(columns=['total_new_users', '+0'])
                 df_percentage_week = pd.DataFrame(columns=['total_new_users', '+0'])
             else:
-                # ====================================
-                # Calcul de la rétention hebdomadaire
-                # ====================================
-                
                 # Dictionnaire pour stocker la rétention par cohorte
                 week_retention = {}
                 
@@ -385,14 +381,7 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                     if idx in all_weeks_df.index:
                         all_weeks_df.loc[idx, 'total_new_users'] = filtered_df_new_users_week.loc[idx, 'total_new_users']
                 
-                # ========================================
-                # Fusion avec le DataFrame de toutes les semaines
-                # ========================================
                 df_numeric_week = all_weeks_df.merge(df_retention_week, left_index=True, right_index=True, how='left')
-                
-                # ======================================================
-                # Réordonner les colonnes de rétention dans l'ordre croissant
-                # ======================================================
                 
                 retention_cols = sorted(
                     [col for col in df_numeric_week.columns if col.startswith("+")],
@@ -420,7 +409,7 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                 return ''
             
 
-        # Afficher les tableaux avec Streamlit (pour les données hebdomadaires)
+            # Afficher les tableaux avec Streamlit (pour les données hebdomadaires)
             st.title("Partie Rétention - Analyse Hebdomadaire")
             st.header("📅 Tableau des cohortes hebdomadaires (valeurs numériques)")
             st.dataframe(df_numeric_week)
@@ -521,71 +510,83 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                 )
             )
 
-            # Afficher le graphique dans Streamlit
             st.plotly_chart(fig)
         
-            # ========================
-            # Layer Cake Chart Hebdomadaire
-            # ========================
+            # ----------------------------------------------------------------
+            # Section : Layer Cake Chart Hebdomadaire Utilisateurs Connectés
+            # ----------------------------------------------------------------
             st.title("🍰 Partie Layer Cake")
 
-            # Vérifier que df_numeric_week existe et n'est pas vide
             if 'df_numeric_week' not in locals() or df_numeric_week.empty:
                 st.warning("❌ Aucune donnée de rétention hebdomadaire disponible pour générer le Layer Cake.")
                 st.stop()
 
-            # Copier df_numeric_week et remplacer NaN par 0
             df_layer_cake = df_numeric_week.copy().fillna(0)
 
             # Supprimer la colonne "total_new_users" si elle existe
             if "total_new_users" in df_layer_cake.columns:
                 df_layer_cake = df_layer_cake.drop(columns=["total_new_users"])
 
-            # Conserver uniquement les colonnes de rétention (celles qui commencent par "+")
+            # Récupérer les colonnes de type "+0", "+1", ...
             retention_cols = [col for col in df_layer_cake.columns if col.startswith("+")]
-            # Assurer un ordre croissant, par exemple "+0", "+1", "+2", ...
             retention_cols = sorted(retention_cols, key=lambda c: int(c.replace("+", "")))
             df_layer_cake = df_layer_cake[retention_cols]
 
-            # On suppose que l'index (les cohortes) est déjà chronologique (du plus ancien au plus récent)
             df_layer_cake.sort_index(ascending=True, inplace=True)
 
             num_weeks = len(retention_cols)
-            x_axis = np.arange(num_weeks)  # Axe x : [0, 1, 2, ..., num_weeks-1]
+            x_axis = np.arange(num_weeks)
 
-            # Initialiser la figure Plotly et la palette de couleurs
             fig = go.Figure()
             num_cohorts = len(df_layer_cake)
             colormap = cm.get_cmap('tab20c', num_cohorts)
 
-            # Parcourir chaque cohorte (du plus ancien au plus récent)
+            # Créer une matrice vide pour y placer les courbes décalées
+            stacked_matrix = np.full((num_cohorts, num_weeks), np.nan)
+
+            for i, row in enumerate(df_layer_cake.itertuples(index=False)):
+                values = np.array(row)
+                shifted = [np.nan] * i + list(values[:num_weeks - i])
+                stacked_matrix[i, :len(shifted)] = shifted
+
+            # Générer les traces
             for i, (cohort_date, row) in enumerate(df_layer_cake.iterrows()):
-                # Extraire les valeurs de rétention de la cohorte
                 cohort_values = np.array(row.tolist(), dtype=float)
-                
-                # Créer une série décalée : i positions initiales seront None pour ne pas afficher de valeurs avant le début
                 shifted = [None] * i + list(cohort_values[:num_weeks - i])
-                
+                customdata = []
+                for j in range(num_weeks):
+                    if j < i:
+                        customdata.append(None)
+                    else:
+                        total = np.nansum(stacked_matrix[:i+1, j])
+                        customdata.append(total)
+
                 rgba = colormap(i / num_cohorts)
                 color = f"rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})"
-                
+
                 fig.add_trace(go.Scatter(
                     x=x_axis,
                     y=shifted,
                     mode='lines',
-                    stackgroup='one',  # Empilement automatique avec Plotly
+                    stackgroup='one',
                     name=f"Cohorte {cohort_date.strftime('%Y-%m-%d')}",
-                    line=dict(color=color)
+                    line=dict(color=color),
+                    customdata=customdata,
+                    hovertemplate=(
+                        "<b>Cohorte</b> : %{fullData.name}<br>" +
+                        "<b>Semaine</b> : %{x}<br>" +
+                        "<b>Utilisateurs de la cohorte</b> : %{y:.0f}<br>" +
+                        "<b>Total empilé</b> : %{customdata:.0f}" +
+                        "<extra></extra>"
+                    )
                 ))
 
-            # Configurer l'axe x pour afficher "+0", "+1", ... etc.
             fig.update_xaxes(
                 tickmode='array',
                 tickvals=list(x_axis),
                 ticktext=[f"+{i}" for i in x_axis]
             )
 
-            # Mettre à jour la mise en page pour isoler la trace cliquée dans la légende
             fig.update_layout(
                 title="📊 Layer Cake Chart - Rétention des utilisateurs",
                 xaxis_title="Semaines après premier achat",
@@ -595,6 +596,7 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
             )
 
             st.plotly_chart(fig)
+
             # -------------------------------
             # Section : Export de cohorte
             # -------------------------------
@@ -683,18 +685,11 @@ if page == "Rétention" and user_type == "Utilisateurs Connectés" and toggle_vi
                         mime="text/csv"
                     )
 
-
-
+# ------------------------------------------------------
+# Partie Rétention Mensuel Utilisateurs Connectés 
+# ------------------------------------------------------
 
 elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisateurs Connectés":
-    # ========================
-    # 📅 Cohortes par MOIS (nouveaux utilisateurs ayant payé ce mois-là)
-    # ========================
-    # Définir le filtre de base pour tous les paiements dans la période et pour le magasin
-    # ----------------------------
-    # 1) Construction des pipelines
-    # ---------------------------
-
     # Pipeline pour récupérer les nouveaux utilisateurs par mois
     if selected_payment_method == "Tous":
         pipeline_new_users = [
@@ -819,9 +814,6 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
             {"$sort": {"_id.year": 1, "_id.month": 1}}
         ]
 
-    # ----------------------------
-    # 2) Exécution des pipelines
-    # ----------------------------
     cursor_new_users = users_collection.aggregate(pipeline_new_users)
     cursor_active_users = users_collection.aggregate(pipeline_active_users)
 
@@ -832,9 +824,6 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
         st.error("❌ Aucune donnée trouvée ! Vérifiez la structure de votre base MongoDB.")
         st.stop()
 
-    # ----------------------------
-    # 3) Construction des DataFrames
-    # ----------------------------
     df_new_users = pd.DataFrame(data_new_users)
     df_active_users = pd.DataFrame(data_active_users)
 
@@ -861,9 +850,8 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
     df_new_users = df_new_users[df_new_users.index < first_day_current_month]
     df_active_users = df_active_users[df_active_users.index < first_day_current_month]
 
-
     # ----------------------------
-    # 4) Calcul de la rétention mensuelle
+    # Calcul de la rétention mensuelle
     # ----------------------------
     monthly_retention = {}
     for index, row in df_new_users.iterrows():
@@ -891,14 +879,11 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
         df_monthly_retention, left_index=True, right_index=True, how='left'
     )
 
-    # ----------------------------
-    # 5) Afficher tous les mois de la plage, même s'ils sont à 0
-    # ----------------------------
-
     # a) Générer la liste complète des mois
     today = datetime.now()
     first_day_current_month = datetime(today.year, today.month, 1)
     last_month_completed = first_day_current_month - pd.DateOffset(months=1)
+
     # Aligner date_start sur le premier jour du mois
     date_start = datetime(date_start.year, date_start.month, 1)
 
@@ -942,17 +927,11 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
                 if pd.isna(current_value):
                     df_final.at[index, col_name] = 0
 
-    # ----------------------------
-    # 6) Affichage des cohortes mensuelles (valeurs numériques)
-    # ----------------------------
     st.title("Partie Rétention - Analyse Mensuelle")
     st.header("📅 Tableau des cohortes mensuelles")
     st.subheader("📊 Cohortes mensuelles (valeurs numériques)")
     st.dataframe(df_final)
 
-    # ----------------------------
-    # 7) Calcul des pourcentages
-    # ----------------------------
     df_percentage = df_final.copy()
     df_percentage_calcul = df_final.copy()
 
@@ -979,10 +958,6 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
         df_percentage.style.applymap(apply_red_gradient_with_future, subset=[c for c in df_percentage.columns if c.startswith("+")])
     )
 
-    # ----------------------------
-    # 8) (Optionnel) Graphique de rétention mensuelle
-    # ----------------------------
-    # Supprimer "total_new_users" avant le tracé
     df_plot = df_percentage.drop(columns=["total_new_users"]) if "total_new_users" in df_percentage.columns else df_percentage.copy()
 
     fig = go.Figure()
@@ -1033,6 +1008,9 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
     st.header("📈 Évolution du pourcentage d'utilisateurs par cohorte (mensuelle)")
     st.plotly_chart(fig)
 
+    # -----------------------------------------------------------
+    # Section : Layer Cake Chart Mensuel Utilisateurs Connectés
+    # -----------------------------------------------------------
     st.title("🍰 Partie Layer Cake - Mensuel (Valeurs numériques)")
 
     # Vérifier que df_final existe et n'est pas vide (ou utilisez df_numeric_month si c'est votre DataFrame source)
@@ -1134,8 +1112,6 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
                     # La colonne "new_users" contient un ensemble d'_id pour la cohorte
                     user_ids.update(df_new_users.loc[cohort_date, "new_users"])
             
-            # IMPORTANT : Convertir les _id (qui sont des chaînes) en ObjectId pour la requête Mongo
-            from bson import ObjectId
             user_ids_converted = [ObjectId(uid) for uid in user_ids]
             
             # Définir la projection pour récupérer les coordonnées et le tableau receipt
@@ -1201,156 +1177,1263 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
                 file_name="cohorte_export.csv",
                 mime="text/csv"
             )
+# ------------------------------------------------------
+# Partie Rétention Hebdomadaire Invités
+# ------------------------------------------------------
+if page == "Rétention" and toggle_view == "Hebdomadaire" and user_type == "Invités":
+    st.title("Partie Rétention - Invités (Hebdomadaire)")
 
-elif page == "Rétention" and toggle_view == "Hebdomadaire" and user_type == "Invités":
-    st.write("✅ Mode Rétention Hebdomadaire - Invités sélectionné")
+    if isinstance(store_filter, str):
+        store_filter = ObjectId(store_filter)
 
-    # 📌 Pipeline MongoDB pour récupérer les **nouveaux invités payants** par semaine
-    guest_pipeline_new_users_week = [
-        # 🏷️ Étape 1 : Filtrer les documents où `userId` commence par "GUEST_" et est payé
-        {"$match": {
-            "userId": {"$exists": True, "$ne": None, "$regex": "^GUEST_"},  
-            "isPaid": True,  
-            "storeId": store_filter  
+    base_filter_guest = {
+        "isPaid": True,
+        "storeId": store_filter,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "userId": { "$exists": True },
+        "$or": [
+            { "userId": None },
+            { "userId": "" },
+            { "userId": { "$regex": "^GUEST_", "$options": "i" } }
+        ]
+    }
+
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guest["paymentMethod"] = {"$in": variants}
+
+    # 🔹 Nouveaux invités
+    pipeline_new_users_week = [
+        { "$match": base_filter_guest },
+        { "$addFields": {
+            "guestKey": {
+                "$cond": [
+                    { "$or": [
+                        { "$eq": ["$userId", None] },
+                        { "$eq": ["$userId", ""] }
+                    ]},
+                    { "$toString": "$_id" },
+                    "$userId"
+                ]
+            }
         }},
-        # 🏷️ Étape 2 : Trouver **la première transaction payée** de chaque invité
-        {"$group": {
-            "_id": "$userId",  
-            "firstPaidAt": {"$min": "$paidAt"}  
+        { "$group": {
+            "_id": "$guestKey",
+            "firstPaidAt": { "$min": "$paidAt" }
         }},
-        # 🏷️ Étape 3 : Extraire **l'année et la semaine** du premier paiement
-        {"$addFields": {
-            "guest_firstPaidWeek": {"$isoWeek": "$firstPaidAt"},
-            "guest_firstPaidYear": {"$isoWeekYear": "$firstPaidAt"}
-        }},
-        # 🏷️ Étape 4 : Grouper les invités par **année et semaine du premier paiement**
-        {"$group": {
-            "_id": {"year": "$guest_firstPaidYear", "week": "$guest_firstPaidWeek"},
-            "guest_new_users": {"$addToSet": "$_id"}  
-        }},
-        # 🏷️ Étape 5 : Calculer le nombre total de nouveaux invités par semaine
-        {"$project": {
-            "_id": 1,
-            "guest_total_new_users": {"$size": "$guest_new_users"},  
-            "guest_new_users": 1  
-        }},
-        # 🏷️ Étape 6 : Trier les résultats par **année et semaine**
-        {"$sort": {"_id.year": 1, "_id.week": 1}}
+        { "$project": {
+            "_id": 0,
+            "guestKey": "$_id",
+            "year": { "$isoWeekYear": "$firstPaidAt" },
+            "week": { "$isoWeek": "$firstPaidAt" }
+        }}
     ]
 
-    # 📌 Pipeline MongoDB pour récupérer les **invités actifs** par semaine
-    guest_pipeline_active_users_week = [
-        # 🏷️ Étape 1 : Filtrer les documents où `userId` commence par "GUEST_" et est payé
-        {"$match": {
-            "userId": {"$exists": True, "$ne": None, "$regex": "^GUEST_"},  
-            "isPaid": True,  
-            "storeId": store_filter  
+    # 🔹 Actifs par semaine
+    pipeline_active_users_week = [
+        { "$match": base_filter_guest },
+        { "$addFields": {
+            "guestKey": {
+                "$cond": [
+                    { "$or": [
+                        { "$eq": ["$userId", None] },
+                        { "$eq": ["$userId", ""] }
+                    ]},
+                    { "$toString": "$_id" },
+                    "$userId"
+                ]
+            }
         }},
-        # 🏷️ Étape 2 : Extraire **l'année et la semaine** du paiement
-        {"$addFields": {
-            "guest_paymentWeek": {"$isoWeek": "$paidAt"},
-            "guest_paymentYear": {"$isoWeekYear": "$paidAt"}
-        }},
-        # 🏷️ Étape 3 : Grouper par **année et semaine** et rassembler les invités actifs
-        {"$group": {
-            "_id": {"year": "$guest_paymentYear", "week": "$guest_paymentWeek"},
-            "guest_active_users": {"$addToSet": "$userId"}  
-        }},
-        # 🏷️ Étape 4 : Calculer le nombre total d'invités actifs par semaine
-        {"$project": {
-            "_id": 1,
-            "guest_total_active_users": {"$size": "$guest_active_users"},  
-            "guest_active_users": 1  
-        }},
-        # 🏷️ Étape 5 : Trier les résultats par **année et semaine**
-        {"$sort": {"_id.year": 1, "_id.week": 1}}
+        { "$group": {
+            "_id": {
+                "year": { "$isoWeekYear": "$paidAt" },
+                "week": { "$isoWeek": "$paidAt" }
+            },
+            "active_users": { "$addToSet": "$guestKey" }
+        }}
     ]
 
-    # 🛠️ Exécution des requêtes MongoDB
-    guest_cursor_new_users_week = st.session_state.users_collection.aggregate(guest_pipeline_new_users_week)
-    guest_cursor_active_users_week = st.session_state.users_collection.aggregate(guest_pipeline_active_users_week)
+    # Exécuter les requêtes
+    new_users_data = list(st.session_state.orders_collection.aggregate(pipeline_new_users_week))
+    active_users_data = list(st.session_state.orders_collection.aggregate(pipeline_active_users_week))
 
-    guest_data_new_users_week = list(guest_cursor_new_users_week)
-    guest_data_active_users_week = list(guest_cursor_active_users_week)
-
-    # 🚨 Vérification des données avant d'aller plus loin
-    if not guest_data_new_users_week or not guest_data_active_users_week:
-        st.error("❌ Aucune donnée trouvée pour les invités ! Vérifiez la structure de votre base MongoDB.")
+    if not new_users_data or not active_users_data:
+        st.error("❌ Aucune donnée trouvée !")
         st.stop()
 
-    # 🗂️ Transformation en DataFrame
-    df_guest_new_users_week = pd.DataFrame(guest_data_new_users_week)
-    df_guest_active_users_week = pd.DataFrame(guest_data_active_users_week)
+    # Transformation en DataFrames
+    df_new_users_week = pd.DataFrame(new_users_data)
+    df_active_users_week = pd.DataFrame(active_users_data)
 
-    # 📊 Extraction des années et semaines pour structurer les données
-    df_guest_new_users_week['guest_year'] = df_guest_new_users_week['_id'].apply(lambda x: x['year'])
-    df_guest_new_users_week['guest_week'] = df_guest_new_users_week['_id'].apply(lambda x: x['week'])
-    df_guest_active_users_week['guest_year'] = df_guest_active_users_week['_id'].apply(lambda x: x['year'])
-    df_guest_active_users_week['guest_week'] = df_guest_active_users_week['_id'].apply(lambda x: x['week'])
+    df_new_users_week['week_start'] = df_new_users_week.apply(
+        lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1)
+    df_new_users_week = df_new_users_week.groupby('week_start')['guestKey'].apply(set).reset_index()
+    df_new_users_week = df_new_users_week.rename(columns={'guestKey': 'new_users'})
+    df_new_users_week = df_new_users_week.set_index('week_start')
 
-    # 📆 Génération de la colonne "début de semaine"
-    df_guest_new_users_week['guest_week_start'] = df_guest_new_users_week.apply(lambda x: datetime.fromisocalendar(x['guest_year'], x['guest_week'], 1), axis=1)
-    df_guest_active_users_week['guest_week_start'] = df_guest_active_users_week.apply(lambda x: datetime.fromisocalendar(x['guest_year'], x['guest_week'], 1), axis=1)
+    df_active_users_week['week_start'] = df_active_users_week['_id'].apply(
+        lambda x: datetime.fromisocalendar(x['year'], x['week'], 1))
+    df_active_users_week['active_users'] = df_active_users_week['active_users'].apply(
+        lambda users: set(str(u) for u in users) if users else set())
+    df_active_users_week = df_active_users_week[['week_start', 'active_users']].set_index('week_start')
 
-    # 🔄 Convertir les ensembles d'IDs en chaînes pour faciliter la manipulation
-    df_guest_new_users_week['guest_new_users'] = df_guest_new_users_week['guest_new_users'].apply(lambda users: set(str(u) for u in users) if users else set())
-    df_guest_active_users_week['guest_active_users'] = df_guest_active_users_week['guest_active_users'].apply(lambda users: set(str(u) for u in users) if users else set())
+    # ➕ Calcul de la rétention
+    current_date = datetime.now()
+    current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
 
-    # 📌 Trier et indexer par "guest_week_start"
-    df_guest_new_users_week = df_guest_new_users_week.sort_values(by='guest_week_start').set_index('guest_week_start')
-    df_guest_active_users_week = df_guest_active_users_week.sort_values(by='guest_week_start').set_index('guest_week_start')
+    start_date = datetime(2025, 3, 17)
+    all_weeks_range = pd.date_range(start=start_date, end=current_week_start - timedelta(days=1), freq='W-MON')
 
-    # 📊 Calcul de la rétention hebdomadaire
-    guest_week_retention = {}
+    week_retention = {}
+    filtered_df_new_users_week = df_new_users_week[df_new_users_week.index < current_week_start]
+    all_cohort_dates = set(all_weeks_range) | set(filtered_df_new_users_week.index)
 
-    for index, row in df_guest_new_users_week.iterrows():
-        new_user_set = row['guest_new_users']
-        guest_week_retention[index] = {"+0": len(new_user_set)}
+    for idx in all_cohort_dates:
+        week_retention[idx] = {"+0": 0}
 
+    for index, row in filtered_df_new_users_week.iterrows():
+        new_user_set = row['new_users']
+        week_retention[index]["+0"] = len(new_user_set)
         if not new_user_set:
             continue
-
-        # 🔍 Vérifier la rétention des invités actifs dans les semaines suivantes
-        future_weeks = df_guest_active_users_week.loc[df_guest_active_users_week.index > index]
+        future_weeks = df_active_users_week.loc[(df_active_users_week.index > index) & 
+                                                (df_active_users_week.index < current_week_start)]
         for future_index, future_row in future_weeks.iterrows():
             week_diff = (future_index - index).days // 7
-            future_users = future_row['guest_active_users']
-            retained_users = len(new_user_set.intersection(future_users)) if isinstance(future_users, set) else 0
-            guest_week_retention[index][f"+{week_diff}"] = retained_users
+            retained_users = len(new_user_set.intersection(future_row['active_users']))
+            week_retention[index][f"+{week_diff}"] = retained_users
 
-    # 📊 Conversion en DataFrame et affichage
-    df_guest_retention_week = pd.DataFrame.from_dict(guest_week_retention, orient='index').fillna(0)
+    df_retention_week = pd.DataFrame.from_dict(week_retention, orient='index')
+    global_max = max((current_week_start - timedelta(days=7) - idx).days // 7 for idx in df_retention_week.index)
 
-    st.title("📊 Rétention Hebdomadaire - Invités")
-    st.subheader("Tableau des cohortes (valeurs numériques)")
-    st.dataframe(df_guest_retention_week)
+    for index, row in df_retention_week.iterrows():
+        for week_diff in range(global_max + 1):
+            col_name = f"+{week_diff}"
+            future_week = index + timedelta(weeks=week_diff)
+            if future_week >= current_week_start:
+                df_retention_week.at[index, col_name] = None
+            elif pd.isna(row.get(col_name, None)):
+                df_retention_week.at[index, col_name] = 0
 
-    # 📈 Graphique d'évolution de la rétention
+    all_weeks_df = pd.DataFrame(index=sorted(all_cohort_dates))
+    all_weeks_df['total_new_users'] = 0
+    for idx in filtered_df_new_users_week.index:
+        if idx in all_weeks_df.index:
+            all_weeks_df.loc[idx, 'total_new_users'] = len(filtered_df_new_users_week.loc[idx, 'new_users'])
+
+    df_numeric_week = all_weeks_df.merge(df_retention_week, left_index=True, right_index=True, how='left')
+
+    retention_cols = sorted([col for col in df_numeric_week.columns if col.startswith("+")],
+                            key=lambda x: int(x.replace("+", "")))
+    other_cols = [col for col in df_numeric_week.columns if not col.startswith("+")]
+    df_numeric_week = df_numeric_week[other_cols + retention_cols]
+
+    # Pourcentage
+    df_percentage_week = df_numeric_week.copy()
+    for col in df_percentage_week.columns:
+        if col.startswith("+") and col != "+0":
+            mask = (df_percentage_week["+0"] > 0) & (df_percentage_week[col].notna())
+            df_percentage_week.loc[mask, col] = (
+                df_percentage_week.loc[mask, col] / df_percentage_week.loc[mask, "+0"] * 100
+            ).round(1)
+    df_percentage_week["+0"] = df_percentage_week["+0"].apply(lambda x: 100 if x > 0 else 0)
+
+    def apply_red_gradient_with_future(val):
+        if pd.isna(val):
+            return 'background-color: #f0f0f0; color: #f0f0f0;'
+        elif pd.notna(val):
+            intensity = int(255 * ((1 - val / 100) ** 3))
+            return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
+        return ''
+
+    # 🔸 AFFICHAGE TABLEAUX
+    st.header("📅 Tableau des cohortes hebdomadaires - Invités (valeurs)")
+    st.dataframe(df_numeric_week)
+
+    st.subheader("📊 Tableau des cohortes hebdomadaires - Invités (%)")
+    st.dataframe(
+        df_percentage_week.style.applymap(
+            apply_red_gradient_with_future,
+            subset=[col for col in df_percentage_week.columns if col.startswith("+")]
+        )
+    )
+
+    # 📈 Courbe de rétention hebdomadaire - Invités (style cohorte connecté)
+    st.subheader("📈 Courbe de rétention hebdomadaire des invités")
+
+    df_plot = df_percentage_week.copy()
     fig = go.Figure()
-    for cohort, row in df_guest_retention_week.iterrows():
+    colormap = cm.get_cmap('tab20c', len(df_plot))
+
+    for i, (idx, row) in enumerate(df_plot.iterrows()):
+        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
+        if "+0" not in valid_values.index:
+            continue
+        rgba = colormap(i / len(df_plot))
+        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
         fig.add_trace(go.Scatter(
-            x=row.index,
-            y=row.values,
-            mode="lines",
-            name=f"Cohorte {cohort.strftime('%Y-%m-%d')}"
+            x=valid_values.index,
+            y=valid_values.values,
+            mode='lines',
+            name=f"Cohorte {idx.strftime('%Y-%m-%d')}",
+            line=dict(width=2, color=color),
+            hoverinfo='x+y',
+            opacity=0.8
         ))
 
+    # 🔸 Ajouter la courbe moyenne
+    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
+    fig.add_trace(go.Scatter(
+        x=average_curve.index,
+        y=average_curve.values,
+        mode='lines',
+        name='Moyenne par +x',
+        line=dict(width=3, color='black'),
+        opacity=1.0
+    ))
+
     fig.update_layout(
-        title="Évolution du pourcentage d'utilisateurs invités par cohorte (hebdomadaire)",
-        xaxis_title="Semaine après le premier achat",
-        yaxis_title="Nombre d'utilisateurs actifs",
-        template="plotly_white"
+        title="📊 Rétention hebdomadaire des invités (%)",
+        xaxis_title="Semaine après premier achat",
+        yaxis_title="Pourcentage de rétention",
+        template="plotly_white",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[f'+{i}' for i in range(len(average_curve))]
+        ),
+        yaxis=dict(
+            tickformat=".1f",
+            range=[0, 110]
+        ),
+        height=500
     )
 
     st.plotly_chart(fig)
 
-elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Invités":
-    print("")
 
-# ========================
-# Acquisition des utilisateurs
-# ========================
-if page == "Acquisition" and toggle_view == "Hebdomadaire":
+# ------------------------------------------------------
+# Partie Rétention Mensuel Invités 
+# ------------------------------------------------------
+
+if page == "Rétention" and toggle_view == "Mensuel" and user_type == "Invités":
+    st.title("Partie Rétention - Invités (Mensuelle)")
+
+    if isinstance(store_filter, str):
+        store_filter = ObjectId(store_filter)
+
+    base_filter_guest = {
+        "isPaid": True,
+        "storeId": store_filter,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "userId": { "$exists": True },
+        "$or": [
+            { "userId": None },
+            { "userId": "" },
+            { "userId": { "$regex": "^GUEST_", "$options": "i" } }
+        ]
+    }
+
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guest["paymentMethod"] = {"$in": variants}
+
+    # 🔹 Nouveaux invités mensuels
+    pipeline_new_users_month = [
+        { "$match": base_filter_guest },
+        { "$addFields": {
+            "guestKey": {
+                "$cond": [
+                    { "$or": [
+                        { "$eq": ["$userId", None] },
+                        { "$eq": ["$userId", ""] }
+                    ]},
+                    { "$toString": "$_id" },
+                    "$userId"
+                ]
+            }
+        }},
+        { "$group": {
+            "_id": "$guestKey",
+            "firstPaidAt": { "$min": "$paidAt" }
+        }},
+        { "$project": {
+            "_id": 0,
+            "guestKey": "$_id",
+            "year": { "$year": "$firstPaidAt" },
+            "month": { "$month": "$firstPaidAt" }
+        }}
+    ]
+
+    pipeline_active_users_month = [
+        { "$match": base_filter_guest },
+        { "$addFields": {
+            "guestKey": {
+                "$cond": [
+                    { "$or": [
+                        { "$eq": ["$userId", None] },
+                        { "$eq": ["$userId", ""] }
+                    ]},
+                    { "$toString": "$_id" },
+                    "$userId"
+                ]
+            }
+        }},
+        { "$group": {
+            "_id": {
+                "year": { "$year": "$paidAt" },
+                "month": { "$month": "$paidAt" }
+            },
+            "active_users": { "$addToSet": "$guestKey" }
+        }}
+    ]
+
+    new_data = list(st.session_state.orders_collection.aggregate(pipeline_new_users_month))
+    active_data = list(st.session_state.orders_collection.aggregate(pipeline_active_users_month))
+
+    if not new_data or not active_data:
+        st.error("❌ Aucune donnée trouvée.")
+        st.stop()
+
+    # ➕ Transform into DataFrames
+    df_new = pd.DataFrame(new_data)
+    df_active = pd.DataFrame(active_data)
+
+    df_new['month_start'] = df_new.apply(lambda x: datetime(x['year'], x['month'], 1), axis=1)
+    df_new = df_new.groupby('month_start')['guestKey'].apply(set).reset_index()
+    df_new = df_new.rename(columns={'guestKey': 'new_users'}).set_index('month_start')
+
+    df_active['month_start'] = df_active['_id'].apply(lambda x: datetime(x['year'], x['month'], 1))
+    df_active['active_users'] = df_active['active_users'].apply(
+        lambda users: set(str(u) for u in users) if users else set()
+    )
+    df_active = df_active[['month_start', 'active_users']].set_index('month_start')
+
+    # 📅 Cohortes mensuelles
+    today = datetime.now()
+    current_month_start = datetime(today.year, today.month, 1)
+    all_months = pd.date_range(start=datetime(2025, 3, 1), end=current_month_start - timedelta(days=1), freq='MS')
+
+    retention = {}
+    df_new_filtered = df_new[df_new.index < current_month_start]
+    all_cohort_dates = set(all_months) | set(df_new_filtered.index)
+
+    for idx in all_cohort_dates:
+        retention[idx] = {"+0": 0}
+
+    for index, row in df_new_filtered.iterrows():
+        new_users = row['new_users']
+        retention[index]["+0"] = len(new_users)
+        if not new_users:
+            continue
+        future_months = df_active.loc[(df_active.index > index) & (df_active.index < current_month_start)]
+        for future_index, future_row in future_months.iterrows():
+            month_diff = (future_index.year - index.year) * 12 + (future_index.month - index.month)
+            retained = len(new_users.intersection(future_row['active_users']))
+            retention[index][f"+{month_diff}"] = retained
+
+    df_retention = pd.DataFrame.from_dict(retention, orient='index')
+    global_max = max(
+        [(current_month_start.year - idx.year) * 12 + (current_month_start.month - idx.month - 1)
+        for idx in df_retention.index if idx < current_month_start],
+        default=0
+    )
+
+
+    for index, row in df_retention.iterrows():
+        for i in range(global_max + 1):
+            col = f"+{i}"
+            future_month = datetime(index.year, index.month, 1) + pd.DateOffset(months=i)
+            if future_month >= current_month_start:
+                df_retention.at[index, col] = None
+            elif pd.isna(row.get(col, None)):
+                df_retention.at[index, col] = 0
+
+    df_all_months = pd.DataFrame(index=sorted(all_cohort_dates))
+    df_all_months['total_new_users'] = 0
+    for idx in df_new_filtered.index:
+        df_all_months.loc[idx, 'total_new_users'] = len(df_new_filtered.loc[idx, 'new_users'])
+
+    df_numeric_month = df_all_months.merge(df_retention, left_index=True, right_index=True, how='left')
+    retention_cols = sorted([c for c in df_numeric_month.columns if c.startswith("+")], key=lambda x: int(x[1:]))
+    other_cols = [c for c in df_numeric_month.columns if not c.startswith("+")]
+    df_numeric_month = df_numeric_month[other_cols + retention_cols]
+
+    # % Rétention
+    df_percentage_month = df_numeric_month.copy()
+    if "+0" in df_percentage_month.columns:
+        for col in df_percentage_month.columns:
+            if col.startswith("+") and col != "+0":
+                mask = (df_percentage_month["+0"] > 0) & (df_percentage_month[col].notna())
+                df_percentage_month.loc[mask, col] = (
+                    df_percentage_month.loc[mask, col] / df_percentage_month.loc[mask, "+0"] * 100
+                ).round(1)
+        df_percentage_month["+0"] = df_percentage_month["+0"].apply(lambda x: 100 if x > 0 else 0)
+
+    def apply_red_gradient(val):
+        if pd.isna(val):
+            return 'background-color: #f0f0f0; color: #f0f0f0;'
+        intensity = int(255 * ((1 - val / 100) ** 3))
+        return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
+
+    # 📊 Tableau brut
+    st.subheader("📅 Tableau des cohortes mensuelles - Invités (valeurs)")
+    st.dataframe(df_numeric_month)
+
+    st.subheader("📊 Tableau des cohortes mensuelles - Invités (%)")
+    st.dataframe(
+        df_percentage_month.style.applymap(
+            apply_red_gradient,
+            subset=[col for col in df_percentage_month.columns if col.startswith("+")]
+        )
+    )
+
+    # 📈 Courbe de rétention (style cohorte connecté)
+    st.subheader("📈 Courbe de rétention mensuelle des invités")
+    df_plot = df_percentage_month.copy()
+    fig = go.Figure()
+    colormap = cm.get_cmap('tab20c', len(df_plot))
+
+    for i, (idx, row) in enumerate(df_plot.iterrows()):
+        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
+        if "+0" not in valid_values.index:
+            continue
+        rgba = colormap(i / len(df_plot))
+        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
+        fig.add_trace(go.Scatter(
+            x=valid_values.index,
+            y=valid_values.values,
+            mode='lines',
+            name=f"Cohorte {idx.strftime('%Y-%m')}",
+            line=dict(width=2, color=color),
+            hoverinfo='x+y',
+            opacity=0.8
+        ))
+
+    # Moyenne
+    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
+    fig.add_trace(go.Scatter(
+        x=average_curve.index,
+        y=average_curve.values,
+        mode='lines',
+        name='Moyenne par +x',
+        line=dict(width=3, color='black'),
+        opacity=1.0
+    ))
+
+    fig.update_layout(
+        title="📊 Rétention mensuelle des invités (%)",
+        xaxis_title="Mois après premier achat",
+        yaxis_title="Pourcentage de rétention",
+        template="plotly_white",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[f'+{i}' for i in range(len(average_curve))]
+        ),
+        yaxis=dict(
+            tickformat=".1f",
+            range=[0, 110]
+        ),
+        height=500
+    )
+
+    st.plotly_chart(fig)
+
+# ------------------------------------------------------
+# Partie Rétention Hebdomadaire Tous
+# ------------------------------------------------------
+
+if page == "Rétention" and toggle_view == "Hebdomadaire" and user_type == "Tous":
+    st.title("Partie Rétention - Tous (Connectés + Invités)")
+
+    # ----------- 🔁 PIPELINES INVITÉS -----------
+
+    # Base filter invités
+    base_filter_guest = {
+        "isPaid": True,
+        "storeId": store_filter,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guest["paymentMethod"] = {"$in": variants}
+
+    # Nouveaux invités
+    pipeline_new_users_week_guests = [
+        {"$match": base_filter_guest},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": "$guestKey",
+            "firstPaidAt": {"$min": "$paidAt"}
+        }},
+        {"$project": {
+            "_id": 0,
+            "guestKey": "$_id",
+            "year": {"$isoWeekYear": "$firstPaidAt"},
+            "week": {"$isoWeek": "$firstPaidAt"}
+        }}
+    ]
+
+    # Actifs invités
+    pipeline_active_users_week_guests = [
+        {"$match": base_filter_guest},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$isoWeekYear": "$paidAt"},
+                "week": {"$isoWeek": "$paidAt"}
+            },
+            "active_users": {"$addToSet": "$guestKey"}
+        }}
+    ]
+
+    # ----------- 🔁 PIPELINES CONNECTÉS -----------
+
+    # Tester exclusion
+    testers_to_exclude = [
+        ObjectId("66df2f59c1271156d5468044"),
+        ObjectId("670f97d3f38642c54d678d26"),
+        ObjectId("65c65360b03953a598253426"),
+        ObjectId("65bcb0e43956788471c88e31")
+    ]
+
+    if selected_payment_method == "Tous":
+        match_filter = base_filter
+        pipeline_new_users_week_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": match_filter},
+            {"$sort": {"receipt.paidAt": 1}},
+            {"$group": {"_id": "$_id", "firstPaidAt": {"$first": "$receipt.paidAt"}}},
+            {"$addFields": {
+                "firstPaidWeek": {"$isoWeek": "$firstPaidAt"},
+                "firstPaidYear": {"$isoWeekYear": "$firstPaidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$firstPaidYear", "week": "$firstPaidWeek"},
+                "new_users": {"$addToSet": "$_id"}
+            }},
+            {"$project": {
+                "_id": 1,
+                "total_new_users": {"$size": "$new_users"},
+                "new_users": 1
+            }}
+        ]
+        pipeline_active_users_week_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": {**base_filter, "_id": {"$nin": testers_to_exclude}}},
+            {"$addFields": {
+                "paymentWeek": {"$isoWeek": "$receipt.paidAt"},
+                "paymentYear": {"$isoWeekYear": "$receipt.paidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$paymentYear", "week": "$paymentWeek"},
+                "active_users": {"$addToSet": "$_id"}
+            }},
+        ]
+    else:
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        match_filter = {**base_filter, "receipt.paymentMethod": {"$in": variants}}
+        pipeline_new_users_week_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": match_filter},
+            {"$group": {"_id": "$_id"}},
+            {"$lookup": {
+                "from": "usertests",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "user_data"
+            }},
+            {"$unwind": "$user_data"},
+            {"$unwind": "$user_data.receipt"},
+            {"$match": {
+                "user_data.receipt.isPaid": True,
+                "user_data.receipt.storeId": store_filter,
+                "user_data.receipt.paymentMethod": {"$in": variants}
+            }},
+            {"$sort": {"user_data.receipt.paidAt": 1}},
+            {"$group": {
+                "_id": "$_id",
+                "firstPaidAt": {"$first": "$user_data.receipt.paidAt"}
+            }},
+            {"$addFields": {
+                "firstPaidWeek": {"$isoWeek": "$firstPaidAt"},
+                "firstPaidYear": {"$isoWeekYear": "$firstPaidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$firstPaidYear", "week": "$firstPaidWeek"},
+                "new_users": {"$addToSet": "$_id"}
+            }},
+            {"$project": {
+                "_id": 1,
+                "total_new_users": {"$size": "$new_users"},
+                "new_users": 1
+            }}
+        ]
+        pipeline_active_users_week_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": {**match_filter, "_id": {"$nin": testers_to_exclude}}},
+            {"$addFields": {
+                "paymentWeek": {"$isoWeek": "$receipt.paidAt"},
+                "paymentYear": {"$isoWeekYear": "$receipt.paidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$paymentYear", "week": "$paymentWeek"},
+                "active_users": {"$addToSet": "$_id"}
+            }},
+        ]
+
+    # ----------- 🧾 EXÉCUTION DES QUERIES -----------
+
+    guest_new_users = list(st.session_state.orders_collection.aggregate(pipeline_new_users_week_guests))
+    guest_active_users = list(st.session_state.orders_collection.aggregate(pipeline_active_users_week_guests))
+    connected_new_users = list(st.session_state.users_collection.aggregate(pipeline_new_users_week_connected))
+    connected_active_users = list(st.session_state.users_collection.aggregate(pipeline_active_users_week_connected))
+
+    # ----------- 🧬 TRANSFORMATION DATAFRAMES -----------
+
+    # Nouveaux invités
+    df_guests_new = pd.DataFrame(guest_new_users)
+    df_guests_new['new_users'] = df_guests_new['guestKey'].apply(lambda x: set([str(x)]))
+    df_guests_new['week_start'] = df_guests_new.apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1)
+    df_guests_new = df_guests_new[['week_start', 'new_users']].set_index('week_start')
+
+    # Nouveaux connectés
+    df_connected_new = pd.DataFrame(connected_new_users)
+    df_connected_new['new_users'] = df_connected_new['new_users'].apply(lambda x: set(str(uid) for uid in x))
+    df_connected_new['week_start'] = df_connected_new.apply(lambda x: datetime.fromisocalendar(x['_id']['year'], x['_id']['week'], 1), axis=1)
+    df_connected_new = df_connected_new[['week_start', 'new_users']].set_index('week_start')
+
+    # Fusion des nouveaux utilisateurs
+    combined_new_users_week = pd.concat([df_guests_new, df_connected_new], axis=0)
+    combined_new_users_week = combined_new_users_week.groupby(combined_new_users_week.index).agg({'new_users': lambda sets: set().union(*sets)})
+    combined_new_users_week['total_new_users'] = combined_new_users_week['new_users'].apply(len)
+
+    # Utilisateurs actifs invités
+    df_guests_active = pd.DataFrame(guest_active_users)
+    df_guests_active['week_start'] = df_guests_active['_id'].apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1))
+    df_guests_active['active_users'] = df_guests_active['active_users'].apply(lambda x: set(str(uid) for uid in x))
+    df_guests_active = df_guests_active[['week_start', 'active_users']].set_index('week_start')
+
+    # Utilisateurs actifs connectés
+    df_connected_active = pd.DataFrame(connected_active_users)
+    df_connected_active['week_start'] = df_connected_active['_id'].apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1))
+    df_connected_active['active_users'] = df_connected_active['active_users'].apply(lambda x: set(str(uid) for uid in x))
+    df_connected_active = df_connected_active[['week_start', 'active_users']].set_index('week_start')
+
+    # Fusion des utilisateurs actifs
+    combined_active_users_week = pd.concat([df_guests_active, df_connected_active], axis=0)
+    combined_active_users_week = combined_active_users_week.groupby(combined_active_users_week.index).agg({'active_users': lambda sets: set().union(*sets)})
+
+    # ----------- 🔁 Rétention Hebdomadaire - Connectés + Invités -----------
+
+    current_date = datetime.now()
+    current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
+
+    # Générer la plage complète de semaines, en excluant la semaine actuelle
+    all_weeks_range = pd.date_range(start=date_start, end=current_week_start - timedelta(days=1), freq='W-MON')
+
+    # Filtrer les nouvelles cohortes avant la semaine en cours
+    filtered_combined_new_users = combined_new_users_week[combined_new_users_week.index < current_week_start]
+    all_cohort_dates = set(all_weeks_range) | set(filtered_combined_new_users.index)
+
+    # Initialiser le dictionnaire de rétention
+    week_retention = {idx: {"+0": 0} for idx in all_cohort_dates}
+
+    # Calcul +0 et intersections
+    for index, row in filtered_combined_new_users.iterrows():
+        new_user_set = row['new_users']
+        week_retention[index]["+0"] = len(new_user_set)
+        if not new_user_set:
+            continue
+
+        future_weeks = combined_active_users_week.loc[
+            (combined_active_users_week.index > index) &
+            (combined_active_users_week.index < current_week_start)
+        ]
+
+        for future_index, future_row in future_weeks.iterrows():
+            week_diff = (future_index - index).days // 7
+            retained_users = len(new_user_set.intersection(future_row['active_users']))
+            week_retention[index][f"+{week_diff}"] = retained_users
+
+    # Convertir en DataFrame
+    df_retention_week = pd.DataFrame.from_dict(week_retention, orient='index')
+
+    # Compléter les colonnes manquantes
+    global_max = max((current_week_start - timedelta(days=7) - idx).days // 7 for idx in df_retention_week.index)
+
+    for index, row in df_retention_week.iterrows():
+        for week_diff in range(global_max + 1):
+            col_name = f"+{week_diff}"
+            future_week = index + timedelta(weeks=week_diff)
+            if future_week >= current_week_start:
+                df_retention_week.at[index, col_name] = None
+            elif pd.isna(row.get(col_name, None)):
+                df_retention_week.at[index, col_name] = 0
+
+    # 🧮 Total nouveaux utilisateurs par semaine
+    all_weeks_df = pd.DataFrame(index=sorted(all_cohort_dates))
+    all_weeks_df['total_new_users'] = 0
+    for idx in filtered_combined_new_users.index:
+        if idx in all_weeks_df.index:
+            all_weeks_df.loc[idx, 'total_new_users'] = len(filtered_combined_new_users.loc[idx, 'new_users'])
+
+    # Fusion avec la rétention
+    df_numeric_week = all_weeks_df.merge(df_retention_week, left_index=True, right_index=True, how='left')
+
+    # Organisation colonnes
+    retention_cols = sorted([col for col in df_numeric_week.columns if col.startswith("+")],
+                            key=lambda x: int(x.replace("+", "")))
+    other_cols = [col for col in df_numeric_week.columns if not col.startswith("+")]
+    df_numeric_week = df_numeric_week[other_cols + retention_cols]
+
+    # Pourcentage
+    df_percentage_week = df_numeric_week.copy()
+    for col in df_percentage_week.columns:
+        if col.startswith("+") and col != "+0":
+            mask = (df_percentage_week["+0"] > 0) & (df_percentage_week[col].notna())
+            df_percentage_week.loc[mask, col] = (
+                df_percentage_week.loc[mask, col] / df_percentage_week.loc[mask, "+0"] * 100
+            ).round(1)
+    df_percentage_week["+0"] = df_percentage_week["+0"].apply(lambda x: 100 if x > 0 else 0)
+
+    # Gradient style
+    def apply_red_gradient_with_future(val):
+        if pd.isna(val):
+            return 'background-color: #f0f0f0; color: #f0f0f0;'
+        elif pd.notna(val):
+            intensity = int(255 * ((1 - val / 100) ** 3))
+            return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
+        return ''
+
+    # 🔎 AFFICHAGE TABLEAUX
+    st.header("📅 Tableau des cohortes hebdomadaires - Tous (valeurs)")
+    st.dataframe(df_numeric_week)
+
+    st.subheader("📊 Tableau des cohortes hebdomadaires - Tous (%)")
+    st.dataframe(
+        df_percentage_week.style.applymap(
+            apply_red_gradient_with_future,
+            subset=[col for col in df_percentage_week.columns if col.startswith("+")]
+        )
+    )
+
+    # 📈 COURBE DE RÉTENTION
+    st.subheader("📈 Courbe de rétention hebdomadaire - Tous")
+
+    df_plot = df_percentage_week.copy()
+    fig = go.Figure()
+    colormap = cm.get_cmap('tab20c', len(df_plot))
+
+    for i, (idx, row) in enumerate(df_plot.iterrows()):
+        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
+        if "+0" not in valid_values.index:
+            continue
+        rgba = colormap(i / len(df_plot))
+        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
+        fig.add_trace(go.Scatter(
+            x=valid_values.index,
+            y=valid_values.values,
+            mode='lines',
+            name=f"Cohorte {idx.strftime('%Y-%m-%d')}",
+            line=dict(width=2, color=color),
+            hoverinfo='x+y',
+            opacity=0.8
+        ))
+
+    # Moyenne
+    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
+    fig.add_trace(go.Scatter(
+        x=average_curve.index,
+        y=average_curve.values,
+        mode='lines',
+        name='Moyenne par +x',
+        line=dict(width=3, color='black'),
+        opacity=1.0
+    ))
+
+    fig.update_layout(
+        title="📊 Rétention hebdomadaire (%) - Utilisateurs Connectés + Invités",
+        xaxis_title="Semaine après le premier achat",
+        yaxis_title="Pourcentage de rétention",
+        template="plotly_white",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[f'+{i}' for i in range(len(average_curve))]
+        ),
+        yaxis=dict(
+            tickformat=".1f",
+            range=[0, 110]
+        ),
+        height=500
+    )
+
+    st.plotly_chart(fig)
+
+    st.title("🍰 Layer Cake - Tous (Utilisateurs Connectés + Invités)")
+
+    if 'df_numeric_week' not in locals() or df_numeric_week.empty:
+        st.warning("❌ Aucune donnée de rétention hebdomadaire disponible pour générer le Layer Cake.")
+        st.stop()
+
+    df_layer_cake = df_numeric_week.copy().fillna(0)
+
+    # Supprimer la colonne "total_new_users" si elle existe
+    if "total_new_users" in df_layer_cake.columns:
+        df_layer_cake = df_layer_cake.drop(columns=["total_new_users"])
+
+    # Garder uniquement les colonnes "+0", "+1", etc.
+    retention_cols = [col for col in df_layer_cake.columns if col.startswith("+")]
+    retention_cols = sorted(retention_cols, key=lambda c: int(c.replace("+", "")))
+    df_layer_cake = df_layer_cake[retention_cols]
+
+    # S'assurer que les index sont triés (par semaine de cohorte)
+    df_layer_cake.sort_index(ascending=True, inplace=True)
+
+    num_weeks = len(retention_cols)
+    x_axis = np.arange(num_weeks)
+
+    fig = go.Figure()
+    num_cohorts = len(df_layer_cake)
+    colormap = cm.get_cmap('tab20c', num_cohorts)
+
+    # Créer une matrice pour stocker les courbes décalées (utilisée pour les totaux empilés)
+    stacked_matrix = np.full((num_cohorts, num_weeks), np.nan)
+
+    for i, row in enumerate(df_layer_cake.itertuples(index=False)):
+        values = np.array(row)
+        shifted = [np.nan] * i + list(values[:num_weeks - i])
+        stacked_matrix[i, :len(shifted)] = shifted
+
+    # Générer les traces pour chaque cohorte
+    for i, (cohort_date, row) in enumerate(df_layer_cake.iterrows()):
+        cohort_values = np.array(row.tolist(), dtype=float)
+        shifted = [None] * i + list(cohort_values[:num_weeks - i])
+        
+        customdata = []
+        for j in range(num_weeks):
+            if j < i:
+                customdata.append(None)
+            else:
+                total = np.nansum(stacked_matrix[:i+1, j])
+                customdata.append(total)
+
+        rgba = colormap(i / num_cohorts)
+        color = f"rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})"
+
+        fig.add_trace(go.Scatter(
+            x=x_axis,
+            y=shifted,
+            mode='lines',
+            stackgroup='one',
+            name=f"Cohorte {cohort_date.strftime('%Y-%m-%d')}",
+            line=dict(color=color),
+            customdata=customdata,
+            hovertemplate=(
+                "<b>Cohorte</b> : %{fullData.name}<br>" +
+                "<b>Semaine</b> : %{x}<br>" +
+                "<b>Utilisateurs de la cohorte</b> : %{y:.0f}<br>" +
+                "<b>Total empilé</b> : %{customdata:.0f}" +
+                "<extra></extra>"
+            )
+        ))
+
+    fig.update_xaxes(
+        tickmode='array',
+        tickvals=list(x_axis),
+        ticktext=[f"+{i}" for i in x_axis]
+    )
+
+    fig.update_layout(
+        title="📊 Layer Cake Chart - Rétention Hebdomadaire - Utilisateurs Connectés + Invités",
+        xaxis_title="Semaines après le premier achat",
+        yaxis_title="Nombre d'utilisateurs cumulés",
+        template="plotly_white",
+        legend_title="Cohortes hebdomadaires"
+    )
+
+    st.plotly_chart(fig)
+
+# ------------------------------------------------------
+# Partie Rétention Mensuel Tous
+# ------------------------------------------------------
+if page == "Rétention" and toggle_view == "Mensuel" and user_type == "Tous":
+    st.title("Partie Rétention - Tous (Connectés + Invités - Mensuel)")
+
+    # ------------------ INVITÉS ------------------
+    base_filter_guest = {
+        "isPaid": True,
+        "storeId": store_filter,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guest["paymentMethod"] = {"$in": variants}
+
+    pipeline_new_users_month_guests = [
+        {"$match": base_filter_guest},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": "$guestKey",
+            "firstPaidAt": {"$min": "$paidAt"}
+        }},
+        {"$project": {
+            "guestKey": "$_id",
+            "year": {"$year": "$firstPaidAt"},
+            "month": {"$month": "$firstPaidAt"}
+        }}
+    ]
+
+    pipeline_active_users_month_guests = [
+        {"$match": base_filter_guest},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$paidAt"},
+                "month": {"$month": "$paidAt"}
+            },
+            "active_users": {"$addToSet": "$guestKey"}
+        }}
+    ]
+
+    # ------------------ CONNECTÉS ------------------
+    testers_to_exclude = [
+        ObjectId("66df2f59c1271156d5468044"),
+        ObjectId("670f97d3f38642c54d678d26"),
+        ObjectId("65c65360b03953a598253426"),
+        ObjectId("65bcb0e43956788471c88e31")
+    ]
+
+    if selected_payment_method == "Tous":
+        match_filter = base_filter
+        pipeline_new_users_month_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": match_filter},
+            {"$sort": {"receipt.paidAt": 1}},
+            {"$group": {"_id": "$_id", "firstPaidAt": {"$first": "$receipt.paidAt"}}},
+            {"$addFields": {
+                "year": {"$year": "$firstPaidAt"},
+                "month": {"$month": "$firstPaidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$year", "month": "$month"},
+                "new_users": {"$addToSet": "$_id"}
+            }}
+        ]
+        pipeline_active_users_month_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": {**base_filter, "_id": {"$nin": testers_to_exclude}}},
+            {"$addFields": {
+                "year": {"$year": "$receipt.paidAt"},
+                "month": {"$month": "$receipt.paidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$year", "month": "$month"},
+                "active_users": {"$addToSet": "$_id"}
+            }}
+        ]
+    else:
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        match_filter = {**base_filter, "receipt.paymentMethod": {"$in": variants}}
+        pipeline_new_users_month_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": match_filter},
+            {"$group": {"_id": "$_id"}},
+            {"$lookup": {
+                "from": "usertests",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "user_data"
+            }},
+            {"$unwind": "$user_data"},
+            {"$unwind": "$user_data.receipt"},
+            {"$match": {
+                "user_data.receipt.isPaid": True,
+                "user_data.receipt.storeId": store_filter,
+                "user_data.receipt.paymentMethod": {"$in": variants}
+            }},
+            {"$sort": {"user_data.receipt.paidAt": 1}},
+            {"$group": {
+                "_id": "$_id",
+                "firstPaidAt": {"$first": "$user_data.receipt.paidAt"}
+            }},
+            {"$addFields": {
+                "year": {"$year": "$firstPaidAt"},
+                "month": {"$month": "$firstPaidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$year", "month": "$month"},
+                "new_users": {"$addToSet": "$_id"}
+            }}
+        ]
+        pipeline_active_users_month_connected = [
+            {"$unwind": "$receipt"},
+            {"$match": {**match_filter, "_id": {"$nin": testers_to_exclude}}},
+            {"$addFields": {
+                "year": {"$year": "$receipt.paidAt"},
+                "month": {"$month": "$receipt.paidAt"}
+            }},
+            {"$group": {
+                "_id": {"year": "$year", "month": "$month"},
+                "active_users": {"$addToSet": "$_id"}
+            }}
+        ]
+
+    # 🧾 Exécution des requêtes
+    guest_new_users = list(st.session_state.orders_collection.aggregate(pipeline_new_users_month_guests))
+    guest_active_users = list(st.session_state.orders_collection.aggregate(pipeline_active_users_month_guests))
+    connected_new_users = list(st.session_state.users_collection.aggregate(pipeline_new_users_month_connected))
+    connected_active_users = list(st.session_state.users_collection.aggregate(pipeline_active_users_month_connected))
+
+    # ----------- 📆 TRANSFORMATION EN DATAFRAMES MENSUELS -----------
+
+    # 🔹 Nouveaux utilisateurs - Invités
+    df_guests_new = pd.DataFrame(guest_new_users)
+    if not df_guests_new.empty:
+        df_guests_new['new_users'] = df_guests_new['guestKey'].apply(lambda x: set([str(x)]))
+        df_guests_new['month_start'] = df_guests_new.apply(lambda x: datetime(x['year'], x['month'], 1), axis=1)
+        df_guests_new = df_guests_new[['month_start', 'new_users']].set_index('month_start')
+    else:
+        df_guests_new = pd.DataFrame(columns=['new_users'])
+
+    # 🔹 Nouveaux utilisateurs - Connectés
+    df_connected_new = pd.DataFrame(connected_new_users)
+    if not df_connected_new.empty:
+        df_connected_new['new_users'] = df_connected_new['new_users'].apply(lambda x: set(str(u) for u in x))
+        df_connected_new['month_start'] = df_connected_new['_id'].apply(lambda x: datetime(x['year'], x['month'], 1))
+        df_connected_new = df_connected_new[['month_start', 'new_users']].set_index('month_start')
+    else:
+        df_connected_new = pd.DataFrame(columns=['new_users'])
+
+    # 🔀 Fusion des nouveaux utilisateurs
+    combined_new_users_month = pd.concat([df_guests_new, df_connected_new])
+    combined_new_users_month = combined_new_users_month.groupby(combined_new_users_month.index).agg({'new_users': lambda sets: set().union(*sets)})
+    combined_new_users_month['total_new_users'] = combined_new_users_month['new_users'].apply(len)
+
+    # 🔹 Utilisateurs actifs - Invités
+    df_guests_active = pd.DataFrame(guest_active_users)
+    if not df_guests_active.empty:
+        df_guests_active['month_start'] = df_guests_active['_id'].apply(lambda x: datetime(x['year'], x['month'], 1))
+        df_guests_active['active_users'] = df_guests_active['active_users'].apply(lambda x: set(str(u) for u in x))
+        df_guests_active = df_guests_active[['month_start', 'active_users']].set_index('month_start')
+    else:
+        df_guests_active = pd.DataFrame(columns=['active_users'])
+
+    # 🔹 Utilisateurs actifs - Connectés
+    df_connected_active = pd.DataFrame(connected_active_users)
+    if not df_connected_active.empty:
+        df_connected_active['month_start'] = df_connected_active['_id'].apply(lambda x: datetime(x['year'], x['month'], 1))
+        df_connected_active['active_users'] = df_connected_active['active_users'].apply(lambda x: set(str(u) for u in x))
+        df_connected_active = df_connected_active[['month_start', 'active_users']].set_index('month_start')
+    else:
+        df_connected_active = pd.DataFrame(columns=['active_users'])
+
+    # 🔀 Fusion des utilisateurs actifs
+    combined_active_users_month = pd.concat([df_guests_active, df_connected_active])
+    combined_active_users_month = combined_active_users_month.groupby(combined_active_users_month.index).agg({'active_users': lambda sets: set().union(*sets)})
+
+    # ----------- 📈 CALCUL RÉTENTION MENSUELLE -----------
+
+    # Date actuelle et début du mois en cours
+    current_date = datetime.now()
+    current_month_start = datetime(current_date.year, current_date.month, 1)
+
+    # Plage complète de mois (exclut le mois courant)
+    all_months_range = pd.date_range(start=date_start, end=current_month_start - timedelta(days=1), freq='MS')
+
+    filtered_combined_new_users = combined_new_users_month[combined_new_users_month.index < current_month_start]
+    all_cohort_months = set(all_months_range) | set(filtered_combined_new_users.index)
+
+    # Initialisation du dict
+    month_retention = {idx: {"+0": 0} for idx in all_cohort_months}
+
+    # Remplissage des +0 et suivants
+    for index, row in filtered_combined_new_users.iterrows():
+        new_user_set = row['new_users']
+        month_retention[index]["+0"] = len(new_user_set)
+        if not new_user_set:
+            continue
+
+        future_months = combined_active_users_month.loc[
+            (combined_active_users_month.index > index) &
+            (combined_active_users_month.index < current_month_start)
+        ]
+
+        for future_index, future_row in future_months.iterrows():
+            month_diff = (future_index.year - index.year) * 12 + (future_index.month - index.month)
+            retained_users = len(new_user_set.intersection(future_row['active_users']))
+            month_retention[index][f"+{month_diff}"] = retained_users
+
+    # Conversion en DataFrame
+    df_retention_month = pd.DataFrame.from_dict(month_retention, orient='index')
+
+    # Compléter colonnes
+    max_offset = max((current_month_start - timedelta(days=1) - idx).days // 30 for idx in df_retention_month.index)
+
+    for index, row in df_retention_month.iterrows():
+        for month_diff in range(max_offset + 1):
+            col_name = f"+{month_diff}"
+            future_month = index + pd.DateOffset(months=month_diff)
+            if future_month >= current_month_start:
+                df_retention_month.at[index, col_name] = None
+            elif pd.isna(row.get(col_name, None)):
+                df_retention_month.at[index, col_name] = 0
+
+    # Totaux
+    all_months_df = pd.DataFrame(index=sorted(all_cohort_months))
+    all_months_df['total_new_users'] = 0
+    for idx in filtered_combined_new_users.index:
+        if idx in all_months_df.index:
+            all_months_df.loc[idx, 'total_new_users'] = len(filtered_combined_new_users.loc[idx, 'new_users'])
+
+    # Fusion avec retention
+    df_numeric_month = all_months_df.merge(df_retention_month, left_index=True, right_index=True, how='left')
+
+    # Organisation colonnes
+    retention_cols = sorted([col for col in df_numeric_month.columns if col.startswith("+")], key=lambda x: int(x[1:]))
+    df_numeric_month = df_numeric_month[['total_new_users'] + retention_cols]
+
+    # Pourcentages
+    df_percentage_month = df_numeric_month.copy()
+    for col in retention_cols:
+        if col != "+0":
+            mask = (df_percentage_month["+0"] > 0) & (df_percentage_month[col].notna())
+            df_percentage_month.loc[mask, col] = (
+                df_percentage_month.loc[mask, col] / df_percentage_month.loc[mask, "+0"] * 100
+            ).round(1)
+    df_percentage_month["+0"] = df_percentage_month["+0"].apply(lambda x: 100 if x > 0 else 0)
+
+    def apply_red_gradient(val):
+        if pd.isna(val):
+            return 'background-color: #f0f0f0; color: #f0f0f0;'
+        intensity = int(255 * ((1 - val / 100) ** 3))
+        return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
+
+    # TABLEAUX
+    st.header("📅 Tableau des cohortes mensuelles - Tous (valeurs)")
+    st.dataframe(df_numeric_month)
+
+    st.subheader("📊 Tableau des cohortes mensuelles - Tous (%)")
+    st.dataframe(
+        df_percentage_month.style.applymap(
+            apply_red_gradient,
+            subset=[col for col in df_percentage_month.columns if col.startswith("+")]
+        )
+    )
+
+    # COURBE
+    st.subheader("📈 Courbe de rétention mensuelle - Tous")
+
+    df_plot = df_percentage_month.copy()
+    fig = go.Figure()
+    colormap = cm.get_cmap('tab20c', len(df_plot))
+
+    for i, (idx, row) in enumerate(df_plot.iterrows()):
+        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
+        if "+0" not in valid_values.index:
+            continue
+        rgba = colormap(i / len(df_plot))
+        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
+        fig.add_trace(go.Scatter(
+            x=valid_values.index,
+            y=valid_values.values,
+            mode='lines',
+            name=f"Cohorte {idx.strftime('%Y-%m')}",
+            line=dict(width=2, color=color),
+            hoverinfo='x+y',
+            opacity=0.8
+        ))
+
+    # Moyenne
+    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
+    fig.add_trace(go.Scatter(
+        x=average_curve.index,
+        y=average_curve.values,
+        mode='lines',
+        name='Moyenne',
+        line=dict(width=3, color='black'),
+        opacity=1.0
+    ))
+
+    fig.update_layout(
+        title="📊 Rétention mensuelle (%) - Tous (Connectés + Invités)",
+        xaxis_title="Mois après premier achat",
+        yaxis_title="Pourcentage de rétention",
+        template="plotly_white",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[f'+{i}' for i in range(len(average_curve))]
+        ),
+        yaxis=dict(
+            tickformat=".1f",
+            range=[0, 110]
+        ),
+        height=500
+    )
+
+    st.plotly_chart(fig)
+
+
+# ----------------------------------------------------------
+# Partie Acquisition Hebdomadaire des Utilisateurs Connectés 
+# ----------------------------------------------------------
+
+if page == "Acquisition" and toggle_view == "Hebdomadaire" and user_type == "Utilisateurs Connectés":
     
     # 📌 Pipeline MongoDB pour récupérer le nombre d'utilisateurs créés par semaine
     pipeline_new_users_per_week = [
@@ -1400,7 +2483,7 @@ if page == "Acquisition" and toggle_view == "Hebdomadaire":
         ~((df_new_users_per_week['year'] == current_year) & (df_new_users_per_week['week'] == current_week))
     ]
 
-    st.title("Partie Acquisition")
+    st.title("📊 Partie Acquisition")
     # 📌 Affichage du tableau des nouveaux utilisateurs par semaine
     st.subheader("📅 Nombre de nouveaux utilisateurs par semaine")
     st.dataframe(df_new_users_per_week['new_users'])
@@ -1415,7 +2498,11 @@ if page == "Acquisition" and toggle_view == "Hebdomadaire":
     st.subheader("📈 Évolution des nouveaux utilisateurs par semaine")
     st.plotly_chart(fig)
 
-elif page == "Acquisition" and toggle_view == "Mensuel":
+# ----------------------------------------------------------
+# Partie Acquisition Mensuelle des Utilisateurs Connectés 
+# ----------------------------------------------------------
+
+elif page == "Acquisition" and toggle_view == "Mensuel" and user_type == "Utilisateurs Connectés":
 
     # 📌 Pipeline MongoDB pour récupérer le nombre d'utilisateurs créés par mois
     pipeline_new_users_per_month = [
@@ -1464,7 +2551,7 @@ elif page == "Acquisition" and toggle_view == "Mensuel":
         ~((df_new_users_per_month['year'] == current_year) & (df_new_users_per_month['month'] == current_month))
     ]
 
-    st.title("📊 Partie Acquisition (Mensuelle)")
+    st.title("📊 Partie Acquisition")
     # 📌 Affichage du tableau des nouveaux utilisateurs par mois
     st.subheader("📅 Nombre de nouveaux utilisateurs par mois")
     st.dataframe(df_new_users_per_month[['new_users']])
@@ -1479,11 +2566,474 @@ elif page == "Acquisition" and toggle_view == "Mensuel":
     st.subheader("📈 Évolution des nouveaux utilisateurs par mois")
     st.plotly_chart(fig)
 
-    # ========================
-    # Weekly Active Users 
-    # ========================
+# ------------------------------------------------------
+# Partie Acquisition Hebdomadaire Invités
+# ------------------------------------------------------
 
-if page == "Active Users" and toggle_view == "Hebdomadaire":
+elif page == "Acquisition" and toggle_view == "Hebdomadaire" and user_type == "Invités":
+    st.title("Partie Acquisition - Utilisateurs Invités")
+    pipeline_new_guests_per_week = [
+        {
+        "$match": {
+            "createdAt": { "$gte": date_start, "$lte": date_end },
+            "userId": { "$exists": True },
+            "$or": [
+                { "userId": None },
+                { "userId": "" },
+                { "userId": { "$regex": "^GUEST_", "$options": "i" } }
+            ]
+        }
+
+        },
+        {
+            "$addFields": {
+                "guestKey": {
+                    "$cond": [
+                        { "$eq": ["$userId", None] },
+                        { "$toString": "$_id" }, 
+                        "$userId"                
+                    ]
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "year": { "$isoWeekYear": "$createdAt" },
+                    "week": { "$isoWeek": "$createdAt" }
+                },
+                "guests": { "$addToSet": "$guestKey" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "guest_count": { "$size": "$guests" }
+            }
+        },
+        { "$sort": { "_id.year": 1, "_id.week": 1 } }
+    ]
+
+
+    # 📌 Exécuter la requête
+    cursor_new_guests_per_week = orders_collection.aggregate(pipeline_new_guests_per_week)
+    data_new_guests_per_week = list(cursor_new_guests_per_week)
+
+    if not data_new_guests_per_week:
+        st.error("❌ Aucune donnée trouvée pour les nouveaux invités par semaine !")
+        st.stop()
+
+    # 📌 Transformation en DataFrame
+    df_new_guests_per_week = pd.DataFrame(data_new_guests_per_week)
+
+    # 📌 Extraction des années et semaines
+    df_new_guests_per_week['year'] = df_new_guests_per_week['_id'].apply(lambda x: x['year'])
+    df_new_guests_per_week['week'] = df_new_guests_per_week['_id'].apply(lambda x: x['week'])
+
+    # 📌 Générer la colonne de début de semaine
+    df_new_guests_per_week['week_start'] = df_new_guests_per_week.apply(
+        lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1
+    )
+
+    # 📌 Trier et indexer
+    df_new_guests_per_week = df_new_guests_per_week.sort_values(by='week_start').set_index('week_start')
+
+    # 📌 Exclure la semaine actuelle
+    today = datetime.now()
+    current_week = today.isocalendar()[1]
+    current_year = today.year
+
+    df_new_guests_per_week = df_new_guests_per_week[
+        ~((df_new_guests_per_week['year'] == current_year) & (df_new_guests_per_week['week'] == current_week))
+    ]
+
+    # 📌 Affichage tableau
+    st.subheader("📅 Nombre de nouveaux utilisateurs invités par semaine")
+    st.dataframe(df_new_guests_per_week['guest_count'])
+
+    # 📌 Courbe Plotly
+    fig = px.line(
+        df_new_guests_per_week,
+        x=df_new_guests_per_week.index,
+        y="guest_count",
+        title="📈 Évolution des nouveaux utilisateurs invités par semaine",
+        labels={"week_start": "Semaine", "guest_count": "Nouveaux invités"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution des nouveaux invités par semaine")
+    st.plotly_chart(fig)
+
+
+
+    current_date = datetime.now()
+    current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
+
+    # Générer la plage complète de semaines, en excluant la semaine actuelle
+    all_weeks_range = pd.date_range(start=date_start, end=current_week_start - timedelta(days=1), freq='W-MON')
+
+    # Filtrer les nouvelles cohortes avant la semaine en cours
+    filtered_combined_new_users = combined_new_users_week[combined_new_users_week.index < current_week_start]
+    all_cohort_dates = set(all_weeks_range) | set(filtered_combined_new_users.index)
+
+    # Initialiser le dictionnaire de rétention
+    week_retention = {idx: {"+0": 0} for idx in all_cohort_dates}
+
+    # Calcul +0 et intersections
+    for index, row in filtered_combined_new_users.iterrows():
+        new_user_set = row['new_users']
+        week_retention[index]["+0"] = len(new_user_set)
+        if not new_user_set:
+            continue
+
+        future_weeks = combined_active_users_week.loc[
+            (combined_active_users_week.index > index) &
+            (combined_active_users_week.index < current_week_start)
+        ]
+
+        for future_index, future_row in future_weeks.iterrows():
+            week_diff = (future_index - index).days // 7
+            retained_users = len(new_user_set.intersection(future_row['active_users']))
+            week_retention[index][f"+{week_diff}"] = retained_users
+
+    # Convertir en DataFrame
+    df_retention_week = pd.DataFrame.from_dict(week_retention, orient='index')
+
+    # Compléter les colonnes manquantes
+    global_max = max((current_week_start - timedelta(days=7) - idx).days // 7 for idx in df_retention_week.index)
+
+    for index, row in df_retention_week.iterrows():
+        for week_diff in range(global_max + 1):
+            col_name = f"+{week_diff}"
+            future_week = index + timedelta(weeks=week_diff)
+            if future_week >= current_week_start:
+                df_retention_week.at[index, col_name] = None
+            elif pd.isna(row.get(col_name, None)):
+                df_retention_week.at[index, col_name] = 0
+
+    # 🧮 Total nouveaux utilisateurs par semaine
+    all_weeks_df = pd.DataFrame(index=sorted(all_cohort_dates))
+    all_weeks_df['total_new_users'] = 0
+    for idx in filtered_combined_new_users.index:
+        if idx in all_weeks_df.index:
+            all_weeks_df.loc[idx, 'total_new_users'] = len(filtered_combined_new_users.loc[idx, 'new_users'])
+
+    # Fusion avec la rétention
+    df_numeric_week = all_weeks_df.merge(df_retention_week, left_index=True, right_index=True, how='left')
+
+    # Organisation colonnes
+    retention_cols = sorted([col for col in df_numeric_week.columns if col.startswith("+")],
+                            key=lambda x: int(x.replace("+", "")))
+    other_cols = [col for col in df_numeric_week.columns if not col.startswith("+")]
+    df_numeric_week = df_numeric_week[other_cols + retention_cols]
+
+    # Pourcentage
+    df_percentage_week = df_numeric_week.copy()
+    for col in df_percentage_week.columns:
+        if col.startswith("+") and col != "+0":
+            mask = (df_percentage_week["+0"] > 0) & (df_percentage_week[col].notna())
+            df_percentage_week.loc[mask, col] = (
+                df_percentage_week.loc[mask, col] / df_percentage_week.loc[mask, "+0"] * 100
+            ).round(1)
+    df_percentage_week["+0"] = df_percentage_week["+0"].apply(lambda x: 100 if x > 0 else 0)
+
+    # Gradient style
+    def apply_red_gradient_with_future(val):
+        if pd.isna(val):
+            return 'background-color: #f0f0f0; color: #f0f0f0;'
+        elif pd.notna(val):
+            intensity = int(255 * ((1 - val / 100) ** 3))
+            return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
+        return ''
+
+    # 🔎 AFFICHAGE TABLEAUX
+    st.header("📅 Tableau des cohortes hebdomadaires - Tous (valeurs)")
+    st.dataframe(df_numeric_week)
+
+    st.subheader("📊 Tableau des cohortes hebdomadaires - Tous (%)")
+    st.dataframe(
+        df_percentage_week.style.applymap(
+            apply_red_gradient_with_future,
+            subset=[col for col in df_percentage_week.columns if col.startswith("+")]
+        )
+    )
+
+    # 📈 COURBE DE RÉTENTION
+    st.subheader("📈 Courbe de rétention hebdomadaire - Tous")
+
+    df_plot = df_percentage_week.copy()
+    fig = go.Figure()
+    colormap = cm.get_cmap('tab20c', len(df_plot))
+
+    for i, (idx, row) in enumerate(df_plot.iterrows()):
+        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
+        if "+0" not in valid_values.index:
+            continue
+        rgba = colormap(i / len(df_plot))
+        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
+        fig.add_trace(go.Scatter(
+            x=valid_values.index,
+            y=valid_values.values,
+            mode='lines',
+            name=f"Cohorte {idx.strftime('%Y-%m-%d')}",
+            line=dict(width=2, color=color),
+            hoverinfo='x+y',
+            opacity=0.8
+        ))
+
+    # Moyenne
+    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
+    fig.add_trace(go.Scatter(
+        x=average_curve.index,
+        y=average_curve.values,
+        mode='lines',
+        name='Moyenne par +x',
+        line=dict(width=3, color='black'),
+        opacity=1.0
+    ))
+
+    fig.update_layout(
+        title="📊 Rétention hebdomadaire (%) - Utilisateurs Connectés + Invités",
+        xaxis_title="Semaine après le premier achat",
+        yaxis_title="Pourcentage de rétention",
+        template="plotly_white",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[f'+{i}' for i in range(len(average_curve))]
+        ),
+        yaxis=dict(
+            tickformat=".1f",
+            range=[0, 110]
+        ),
+        height=500
+    )
+
+    st.plotly_chart(fig)
+
+
+# ------------------------------------------------------
+# Partie Acquisition Mensuelle Invités
+# ------------------------------------------------------
+
+if page == "Acquisition" and toggle_view == "Mensuel" and user_type == "Invités":
+    st.title("Partie Acquisition - Utilisateurs Invités (Mensuel)")
+
+    # 📌 Pipeline MongoDB mensuel
+    pipeline_new_guests_per_month = [
+        {
+            "$match": {
+                "createdAt": {"$gte": date_start, "$lte": date_end},
+                "$or": [
+                    {"userId": None},
+                    {"userId": {"$regex": "^GUEST_"}}
+                ]
+            }
+        },
+        {
+            "$addFields": {
+                "guestKey": {
+                    "$cond": [
+                        { "$eq": ["$userId", None] },
+                        { "$toString": "$_id" },
+                        "$userId"
+                    ]
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "year": { "$year": "$createdAt" },
+                    "month": { "$month": "$createdAt" }
+                },
+                "guests": { "$addToSet": "$guestKey" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "guest_count": { "$size": "$guests" }
+            }
+        },
+        { "$sort": { "_id.year": 1, "_id.month": 1 } }
+    ]
+
+    # 📌 Exécuter la requête
+    cursor_new_guests_per_month = orders_collection.aggregate(pipeline_new_guests_per_month)
+    data_new_guests_per_month = list(cursor_new_guests_per_month)
+
+    if not data_new_guests_per_month:
+        st.error("❌ Aucune donnée trouvée pour les nouveaux invités par mois !")
+        st.stop()
+
+    # 📌 Transformation en DataFrame
+    df_new_guests_per_month = pd.DataFrame(data_new_guests_per_month)
+
+    # 📌 Extraire les champs
+    df_new_guests_per_month['year'] = df_new_guests_per_month['_id'].apply(lambda x: x['year'])
+    df_new_guests_per_month['month'] = df_new_guests_per_month['_id'].apply(lambda x: x['month'])
+
+    # 📌 Créer la date de début de mois
+    df_new_guests_per_month['month_start'] = df_new_guests_per_month.apply(
+        lambda x: datetime(x['year'], x['month'], 1), axis=1
+    )
+    # 📌 Trier et indexer
+    df_new_guests_per_month = df_new_guests_per_month.sort_values(by='month_start').set_index('month_start')
+
+    # 📌 Appliquer la date de début manuelle
+    start_date = datetime(2025, 3, 1)
+    df_new_guests_per_month = df_new_guests_per_month[df_new_guests_per_month.index >= start_date]
+
+    # 📌 Exclure le mois en cours
+    today = datetime.now()
+    df_new_guests_per_month = df_new_guests_per_month[
+        ~((df_new_guests_per_month['year'] == today.year) & (df_new_guests_per_month['month'] == today.month))
+    ]
+
+
+    # 📌 Affichage tableau
+    st.subheader("📅 Nombre de nouveaux utilisateurs invités par mois")
+    st.dataframe(df_new_guests_per_month['guest_count'])
+
+    # 📌 Graphique Plotly
+    fig = px.line(
+        df_new_guests_per_month,
+        x=df_new_guests_per_month.index,
+        y="guest_count",
+        title="📈 Évolution des nouveaux utilisateurs invités par mois",
+        labels={"month_start": "Mois", "guest_count": "Nouveaux invités"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution mensuelle des nouveaux invités")
+    st.plotly_chart(fig)
+
+# ------------------------------------------------------
+# Partie Acquisition Tous les Utilisateurs
+# ------------------------------------------------------
+
+elif page == "Acquisition" and toggle_view == "Hebdomadaire" and user_type == "Tous":
+    st.title("Partie Acquisition - Tous les Utilisateurs (Hebdomadaire)")
+    # Recalculer les deux DataFrames si on est en mode "Tous"
+
+    # Pipeline utilisateurs connectés
+    pipeline_new_users_per_week = [
+        {"$match": {
+            "createdAt": {"$gte": date_start, "$lte": date_end}
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$isoWeekYear": "$createdAt"},
+                "week": {"$isoWeek": "$createdAt"}
+            },
+            "new_users": {"$sum": 1}
+        }},
+        {"$sort": {"_id.year": 1, "_id.week": 1}}
+    ]
+    today = datetime.now()
+    current_week = today.isocalendar()[1]
+    current_year = today.year
+
+    data_new_users_per_week = list(users_collection.aggregate(pipeline_new_users_per_week))
+    df_new_users_per_week = pd.DataFrame(data_new_users_per_week)
+    df_new_users_per_week['year'] = df_new_users_per_week['_id'].apply(lambda x: x['year'])
+    df_new_users_per_week['week'] = df_new_users_per_week['_id'].apply(lambda x: x['week'])
+    df_new_users_per_week['week_start'] = df_new_users_per_week.apply(
+        lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1
+    )
+    df_new_users_per_week = df_new_users_per_week.sort_values(by='week_start').set_index('week_start')
+    df_new_users_per_week = df_new_users_per_week[
+        ~((df_new_users_per_week['year'] == current_year) & (df_new_users_per_week['week'] == current_week))
+    ]
+
+    # Pipeline invités
+    pipeline_new_guests_per_week = [
+        {
+            "$match": {
+                "createdAt": {"$gte": date_start, "$lte": date_end},
+                "$or": [
+                    {"userId": None},
+                    {"userId": {"$regex": "^GUEST_"}}
+                ]
+            }
+        },
+        {
+            "$addFields": {
+                "guestKey": {
+                    "$cond": [
+                        { "$eq": ["$userId", None] },
+                        { "$toString": "$_id" },
+                        "$userId"
+                    ]
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "year": { "$isoWeekYear": "$createdAt" },
+                    "week": { "$isoWeek": "$createdAt" }
+                },
+                "guests": { "$addToSet": "$guestKey" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "guest_count": { "$size": "$guests" }
+            }
+        },
+        { "$sort": { "_id.year": 1, "_id.week": 1 } }
+    ]
+    data_new_guests_per_week = list(orders_collection.aggregate(pipeline_new_guests_per_week))
+    df_new_guests_per_week = pd.DataFrame(data_new_guests_per_week)
+    df_new_guests_per_week['year'] = df_new_guests_per_week['_id'].apply(lambda x: x['year'])
+    df_new_guests_per_week['week'] = df_new_guests_per_week['_id'].apply(lambda x: x['week'])
+    df_new_guests_per_week['week_start'] = df_new_guests_per_week.apply(
+        lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1
+    )
+    df_new_guests_per_week = df_new_guests_per_week.sort_values(by='week_start').set_index('week_start')
+    df_new_guests_per_week = df_new_guests_per_week[
+        ~((df_new_guests_per_week['year'] == current_year) & (df_new_guests_per_week['week'] == current_week))
+    ]
+
+
+    # 📌 Assurer les deux DataFrames existent et sont bien indexés
+    if 'df_new_users_per_week' not in locals() or 'df_new_guests_per_week' not in locals():
+        st.error("❌ Les données des utilisateurs connectés ou invités sont manquantes.")
+        st.stop()
+
+    # 📌 Aligner les deux DataFrames
+    df_total_users_per_week = pd.DataFrame(index=df_new_users_per_week.index.union(df_new_guests_per_week.index))
+    df_total_users_per_week['connectés'] = df_new_users_per_week['new_users']
+    df_total_users_per_week['invités'] = df_new_guests_per_week['guest_count']
+
+    df_total_users_per_week = df_total_users_per_week.fillna(0)
+    df_total_users_per_week['total'] = df_total_users_per_week['connectés'] + df_total_users_per_week['invités']
+
+    # 📌 Affichage tableau
+    st.subheader("📅 Nombre total de nouveaux utilisateurs (connectés + invités) par semaine")
+    st.dataframe(df_total_users_per_week[['connectés', 'invités', 'total']])
+
+    # 📈 Courbe Plotly
+    fig = px.line(
+        df_total_users_per_week,
+        x=df_total_users_per_week.index,
+        y=['connectés', 'invités', 'total'],
+        title="📈 Évolution hebdomadaire de l'acquisition (tous utilisateurs)",
+        labels={"value": "Utilisateurs", "variable": "Type"},
+        markers=True
+    )
+    st.subheader("📈 Évolution hebdomadaire des nouveaux utilisateurs")
+    st.plotly_chart(fig)
+
+
+
+# ------------------------------------------------------
+# Partie Active Users - Hebdomadaire Utilisateurs Connectés
+# ------------------------------------------------------
+
+if page == "Active Users" and toggle_view == "Hebdomadaire" and user_type == "Utilisateurs Connectés":
     # 🔹 Définir le filtre de base
     match_filter = {
         "receipt.isPaid": True,
@@ -1494,27 +3044,24 @@ if page == "Active Users" and toggle_view == "Hebdomadaire":
     # 🔹 Ajouter un filtre pour le mode de paiement si un mode spécifique est sélectionné
     if selected_payment_method != "Tous":
         variants = payment_variants.get(selected_payment_method, [selected_payment_method])
-        match_filter["receipt.paymentMethod"] = {"$in": variants}
 
-    # ========================
-    # 📌 Pipeline pour utilisateurs uniques par SEMAINE
-    # ========================
+        match_filter["receipt.paymentMethod"] = {"$in": variants}
     pipeline_unique_users_per_week = [
-        {"$unwind": "$receipt"},
-        {"$match": match_filter},
-        {"$group": {
-            "_id": {
-                "year": {"$isoWeekYear": "$receipt.paidAt"},
-                "week": {"$isoWeek": "$receipt.paidAt"}
-            },
-            "unique_users": {"$addToSet": "$_id"}
-        }},
-        {"$project": {
-            "_id": 1,
-            "total_unique_users": {"$size": "$unique_users"}
-        }},
-        {"$sort": {"_id.year": 1, "_id.week": 1}}
-    ]
+            {"$unwind": "$receipt"},
+            {"$match": match_filter},
+            {"$group": {
+                "_id": {
+                    "year": {"$isoWeekYear": "$receipt.paidAt"},
+                    "week": {"$isoWeek": "$receipt.paidAt"}
+                },
+                "unique_users": {"$addToSet": "$_id"}
+            }},
+            {"$project": {
+                "_id": 1,
+                "total_unique_users": {"$size": "$unique_users"}
+            }},
+            {"$sort": {"_id.year": 1, "_id.week": 1}}
+     ]
 
     # 🔹 Exécuter la requête MongoDB
     cursor_unique_users_per_week = users_collection.aggregate(pipeline_unique_users_per_week)
@@ -1557,15 +3104,14 @@ if page == "Active Users" and toggle_view == "Hebdomadaire":
     if last_week_start not in df_all_weeks_unique_users.index:
         df_all_weeks_unique_users.loc[last_week_start] = 0
 
-    # 📌 Exclure la semaine en cours
+    # 📌 Exclure la semaine actuelle en définissant clairement son début
     today = datetime.now()
-    current_week = today.isocalendar()[1]
-    current_year = today.year
+    current_week_start = datetime.fromisocalendar(today.year, today.isocalendar()[1], 1)
 
-    df_all_weeks_unique_users = df_all_weeks_unique_users[
-        ~((df_all_weeks_unique_users.index.year == current_year) &
-          (df_all_weeks_unique_users.index.to_series().apply(lambda x: x.isocalendar()[1]) == current_week))
-    ]
+    # 📌 Regénérer la liste des semaines valides (excluant la semaine actuelle)
+    all_weeks = pd.date_range(start=date_start, end=current_week_start - timedelta(days=1), freq='W-MON')
+    df_all_weeks_unique_users = df_all_weeks_unique_users[df_all_weeks_unique_users.index.isin(all_weeks)]
+
 
     # 🔹 Affichage
     st.title("Partie Weekly Active Users")
@@ -1582,7 +3128,11 @@ if page == "Active Users" and toggle_view == "Hebdomadaire":
     st.subheader("📈 Évolution des utilisateurs uniques par semaine")
     st.plotly_chart(fig)
 
-elif page == "Active Users" and toggle_view == "Mensuel":
+# ------------------------------------------------------
+# Partie Active Users - Mensuel Utilisateurs Connectés 
+# ------------------------------------------------------
+
+elif page == "Active Users" and toggle_view == "Mensuel" and user_type == "Utilisateurs Connectés":
         # ========================
         # 📌 Pipeline pour utilisateurs uniques par MOIS
         # ========================
@@ -1646,8 +3196,7 @@ elif page == "Active Users" and toggle_view == "Mensuel":
             ~((df_all_months_unique_users.index.year == current_year) & 
             (df_all_months_unique_users.index.month == current_month))
         ]
-
-
+        
         # 🔹 Affichage
         st.title("Partie Monthly Active Users")
         st.subheader("📊 Tableau utilisateurs uniques par mois")
@@ -1664,13 +3213,480 @@ elif page == "Active Users" and toggle_view == "Mensuel":
         st.plotly_chart(fig)
 
 
-# ========================
-# Bug Report
-# ========================
+# ------------------------------------------------------
+# Partie Active Users - Hebdomadaire Invités
+# ------------------------------------------------------
 
-if page == "Bug Report":
+if page == "Active Users" and toggle_view == "Hebdomadaire" and user_type == "Invités":
+    st.title("Partie Weekly Active Guests")
+
+    # 🔹 Si besoin, convertir en ObjectId
+    if isinstance(store_filter, str):
+        store_filter = ObjectId(store_filter)
+
+    # 🔹 Construire le filtre MongoDB
+    base_filter_guests = {
+        "isPaid": True,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "storeId": store_filter,
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+
+    # 🔹 Si un mode de paiement est sélectionné, l'ajouter au filtre
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guests["paymentMethod"] = {"$in": variants}
+
+    # 🔹 Pipeline MongoDB
+    pipeline_active_guests_per_week = [
+        {"$match": base_filter_guests},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$isoWeekYear": "$paidAt"},
+                "week": {"$isoWeek": "$paidAt"}
+            },
+            "unique_guests": {"$addToSet": "$guestKey"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_guests"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.week": 1}}
+    ]
+
+    # 🔹 Exécuter la requête MongoDB
+    cursor = orders_collection.aggregate(pipeline_active_guests_per_week)
+    data = list(cursor)
+
+    # 🔹 Vérification des données
+    if not data:
+        st.error("❌ Aucune donnée trouvée pour les utilisateurs invités actifs par semaine !")
+        st.stop()
+
+    # 🔹 Transformation en DataFrame
+    df = pd.DataFrame(data)
+    df['year'] = df['_id'].apply(lambda x: x['year'])
+    df['week'] = df['_id'].apply(lambda x: x['week'])
+    df['week_start'] = df.apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1)
+    df = df.sort_values(by='week_start').set_index('week_start')
+
+    # 🔹 Générer la plage des semaines (hors semaine actuelle)
+    start_date = datetime(2025, 3, 17)
+    today = datetime.now()
+    current_week_start = datetime.fromisocalendar(today.year, today.isocalendar()[1], 1)
+
+    all_weeks = pd.date_range(start=start_date, end=current_week_start - timedelta(days=1), freq='W-MON')
+    df_all_weeks = pd.DataFrame(index=all_weeks)
+    df_all_weeks['total_unique_users'] = 0
+    df_all_weeks.update(df)
+
+    # 🔹 Affichage
+    st.subheader("📊 Tableau utilisateurs invités actifs par semaine")
+    st.dataframe(df_all_weeks)
+
+    # 🔹 Courbe Plotly
+    fig = px.line(
+        df_all_weeks,
+        x=df_all_weeks.index,
+        y="total_unique_users",
+        title="📈 Évolution des utilisateurs invités actifs par semaine",
+        labels={"week_start": "Semaine", "total_unique_users": "Utilisateurs invités actifs"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution des utilisateurs invités actifs")
+    st.plotly_chart(fig)
+
+
+# ------------------------------------------------------
+# Partie Active Users - Mensuel Invités
+# ------------------------------------------------------
+
+if page == "Active Users" and toggle_view == "Mensuel" and user_type == "Invités":
+    st.title("Partie Monthly Active Guests")
+
+    # 🔹 Si besoin, convertir le store
+    if isinstance(store_filter, str):
+        store_filter = ObjectId(store_filter)
+
+    # 🔹 Base filter
+    base_filter_guests = {
+        "isPaid": True,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "storeId": store_filter,
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+
+    # 🔹 Ajout du filtre sur le mode de paiement si nécessaire
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        base_filter_guests["paymentMethod"] = {"$in": variants}
+
+    # 🔹 Pipeline MongoDB
+    pipeline_active_guests_per_month = [
+        {"$match": base_filter_guests},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$paidAt"},
+                "month": {"$month": "$paidAt"}
+            },
+            "unique_guests": {"$addToSet": "$guestKey"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_guests"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}}
+    ]
+
+    # 🔹 Exécuter la requête
+    cursor = orders_collection.aggregate(pipeline_active_guests_per_month)
+    data = list(cursor)
+
+    if not data:
+        st.error("❌ Aucune donnée trouvée pour les utilisateurs invités actifs par mois !")
+        st.stop()
+
+    # 🔹 Transformation en DataFrame
+    df = pd.DataFrame(data)
+    df['year'] = df['_id'].apply(lambda x: x['year'])
+    df['month'] = df['_id'].apply(lambda x: x['month'])
+    df['month_start'] = df.apply(lambda x: datetime(x['year'], x['month'], 1), axis=1)
+    df = df.sort_values(by='month_start').set_index('month_start')
+
+    # 🗓️ Forcer la date de départ à partir du 1er mars 2025
+    start_date = datetime(2025, 3, 1)
+    current_month_start = datetime(datetime.now().year, datetime.now().month, 1)
+
+    # 🔹 Générer toutes les périodes mensuelles (hors mois en cours)
+    all_months = pd.date_range(start=start_date, end=current_month_start - timedelta(days=1), freq='MS')
+    df_all_months = pd.DataFrame(index=all_months)
+    df_all_months['total_unique_users'] = 0
+
+    # 🔹 Mettre à jour avec les données réelles
+    df_all_months.update(df)
+
+    # 🔹 Affichage
+    st.subheader("📊 Tableau utilisateurs invités actifs par mois")
+    st.dataframe(df_all_months)
+
+    # 🔹 Courbe Plotly
+    fig = px.line(
+        df_all_months,
+        x=df_all_months.index,
+        y="total_unique_users",
+        title="📈 Évolution des utilisateurs invités actifs par mois",
+        labels={"month_start": "Mois", "total_unique_users": "Utilisateurs invités actifs"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution des utilisateurs invités actifs")
+    st.plotly_chart(fig)
+
+# ------------------------------------------------------
+# Partie Active Users - Hebdomadaire Tous
+# ------------------------------------------------------
+
+if page == "Active Users" and toggle_view == "Hebdomadaire" and user_type == "Tous":
+    st.title("Partie Weekly Active Users - Tous (Connectés + Invités)")
+
+    # ----------------- CONNECTÉS -----------------
+    match_filter_connected = {
+        "receipt.isPaid": True,
+        "receipt.paidAt": {"$gte": date_start, "$lte": date_end},
+        "receipt.storeId": store_filter
+    }
+
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        match_filter_connected["receipt.paymentMethod"] = {"$in": variants}
+
+    pipeline_active_connected = [
+        {"$unwind": "$receipt"},
+        {"$match": match_filter_connected},
+        {"$group": {
+            "_id": {
+                "year": {"$isoWeekYear": "$receipt.paidAt"},
+                "week": {"$isoWeek": "$receipt.paidAt"}
+            },
+            "unique_users": {"$addToSet": "$_id"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_users"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.week": 1}}
+    ]
+
+    data_connected = list(users_collection.aggregate(pipeline_active_connected))
+    df_connected = pd.DataFrame(data_connected)
+    if not df_connected.empty:
+        df_connected['year'] = df_connected['_id'].apply(lambda x: x['year'])
+        df_connected['week'] = df_connected['_id'].apply(lambda x: x['week'])
+        df_connected['week_start'] = df_connected.apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1)
+        df_connected = df_connected[['week_start', 'total_unique_users']].set_index('week_start')
+    else:
+        df_connected = pd.DataFrame(columns=['total_unique_users'])
+
+    # ----------------- INVITÉS -----------------
+    base_filter_guests = {
+        "isPaid": True,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "storeId": store_filter,
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+
+    if selected_payment_method != "Tous":
+        base_filter_guests["paymentMethod"] = {"$in": variants}
+
+    pipeline_active_guests = [
+        {"$match": base_filter_guests},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$isoWeekYear": "$paidAt"},
+                "week": {"$isoWeek": "$paidAt"}
+            },
+            "unique_guests": {"$addToSet": "$guestKey"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_guests"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.week": 1}}
+    ]
+
+    data_guests = list(orders_collection.aggregate(pipeline_active_guests))
+    df_guests = pd.DataFrame(data_guests)
+    if not df_guests.empty:
+        df_guests['year'] = df_guests['_id'].apply(lambda x: x['year'])
+        df_guests['week'] = df_guests['_id'].apply(lambda x: x['week'])
+        df_guests['week_start'] = df_guests.apply(lambda x: datetime.fromisocalendar(x['year'], x['week'], 1), axis=1)
+        df_guests = df_guests[['week_start', 'total_unique_users']].set_index('week_start')
+    else:
+        df_guests = pd.DataFrame(columns=['total_unique_users'])
+
+    # ----------------- FUSION CONNECTÉS + INVITÉS -----------------
+    df_all = pd.concat([df_connected, df_guests])
+    df_all = df_all.groupby(df_all.index).sum()
+
+    # ----------------- COMPLETION ET AFFICHAGE -----------------
+    today = datetime.now()
+    current_week_start = datetime.fromisocalendar(today.year, today.isocalendar()[1], 1)
+    all_weeks = pd.date_range(start=date_start, end=current_week_start - timedelta(days=1), freq='W-MON')
+
+    df_all_weeks = pd.DataFrame(index=all_weeks)
+    df_all_weeks['total_unique_users'] = 0
+    df_all_weeks.update(df_all)
+
+    # 🔹 Affichage tableau
+    st.subheader("📊 Tableau des utilisateurs actifs par semaine - Tous")
+    st.dataframe(df_all_weeks)
+
+    # 🔹 Courbe
+    fig = px.line(
+        df_all_weeks,
+        x=df_all_weeks.index,
+        y="total_unique_users",
+        title="📈 Évolution des utilisateurs actifs par semaine (Connectés + Invités)",
+        labels={"week_start": "Semaine", "total_unique_users": "Utilisateurs actifs"},
+        markers=True
+    )
+    st.subheader("📈 Évolution des utilisateurs actifs")
+    st.plotly_chart(fig)
+
+# ------------------------------------------------------
+# Partie Active Users - Mensuel Tous
+# ------------------------------------------------------
+
+if page == "Active Users" and toggle_view == "Mensuel" and user_type == "Tous":
+    st.title("Partie Monthly Active Users - Tous (Connectés + Invités)")
+
+    # ---------------- CONNECTÉS ----------------
+    match_filter_connected = {
+        "receipt.isPaid": True,
+        "receipt.paidAt": {"$gte": date_start, "$lte": date_end},
+        "receipt.storeId": store_filter
+    }
+
+    if selected_payment_method != "Tous":
+        variants = payment_variants.get(selected_payment_method, [selected_payment_method])
+        match_filter_connected["receipt.paymentMethod"] = {"$in": variants}
+
+    pipeline_connected = [
+        {"$unwind": "$receipt"},
+        {"$match": match_filter_connected},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$receipt.paidAt"},
+                "month": {"$month": "$receipt.paidAt"}
+            },
+            "unique_users": {"$addToSet": "$_id"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_users"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}}
+    ]
+
+    data_connected = list(users_collection.aggregate(pipeline_connected))
+    df_connected = pd.DataFrame(data_connected)
+    if not df_connected.empty:
+        df_connected['year'] = df_connected['_id'].apply(lambda x: x['year'])
+        df_connected['month'] = df_connected['_id'].apply(lambda x: x['month'])
+        df_connected['month_start'] = df_connected.apply(lambda x: datetime(x['year'], x['month'], 1), axis=1)
+        df_connected = df_connected[['month_start', 'total_unique_users']].set_index('month_start')
+    else:
+        df_connected = pd.DataFrame(columns=['total_unique_users'])
+
+    # ---------------- INVITÉS ----------------
+    base_filter_guests = {
+        "isPaid": True,
+        "paidAt": {"$gte": date_start, "$lte": date_end},
+        "storeId": store_filter,
+        "userId": {"$exists": True},
+        "$or": [
+            {"userId": None},
+            {"userId": ""},
+            {"userId": {"$regex": "^GUEST_", "$options": "i"}}
+        ]
+    }
+
+    if selected_payment_method != "Tous":
+        base_filter_guests["paymentMethod"] = {"$in": variants}
+
+    pipeline_guests = [
+        {"$match": base_filter_guests},
+        {"$addFields": {
+            "guestKey": {
+                "$cond": [
+                    {"$or": [
+                        {"$eq": ["$userId", None]},
+                        {"$eq": ["$userId", ""]}
+                    ]},
+                    {"$toString": "$_id"},
+                    "$userId"
+                ]
+            }
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$paidAt"},
+                "month": {"$month": "$paidAt"}
+            },
+            "unique_guests": {"$addToSet": "$guestKey"}
+        }},
+        {"$project": {
+            "_id": 1,
+            "total_unique_users": {"$size": "$unique_guests"}
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}}
+    ]
+
+    data_guests = list(orders_collection.aggregate(pipeline_guests))
+    df_guests = pd.DataFrame(data_guests)
+    if not df_guests.empty:
+        df_guests['year'] = df_guests['_id'].apply(lambda x: x['year'])
+        df_guests['month'] = df_guests['_id'].apply(lambda x: x['month'])
+        df_guests['month_start'] = df_guests.apply(lambda x: datetime(x['year'], x['month'], 1), axis=1)
+        df_guests = df_guests[['month_start', 'total_unique_users']].set_index('month_start')
+    else:
+        df_guests = pd.DataFrame(columns=['total_unique_users'])
+
+    # ---------------- FUSION CONNECTÉS + INVITÉS ----------------
+    df_all = pd.concat([df_connected, df_guests])
+    df_all = df_all.groupby(df_all.index).sum()
+
+    # ---------------- COMPLETION & EXCLUSION MOIS COURANT ----------------
+    today = datetime.now()
+    current_month_start = datetime(today.year, today.month, 1)
+
+    # Choix d’un start_date cohérent (sinon on peut reprendre celui de la base)
+    start_date = min(
+        df_all.index.min() if not df_all.empty else current_month_start,
+        datetime(2025, 3, 1)
+    )
+
+    all_months = pd.date_range(start=start_date, end=current_month_start - timedelta(days=1), freq='MS')
+    df_all_months = pd.DataFrame(index=all_months)
+    df_all_months['total_unique_users'] = 0
+
+    df_all_months.update(df_all)
+
+    # ---------------- AFFICHAGE ----------------
+    st.subheader("📊 Tableau utilisateurs actifs mensuels - Tous")
+    st.dataframe(df_all_months)
+
+    fig = px.line(
+        df_all_months,
+        x=df_all_months.index,
+        y="total_unique_users",
+        title="📈 Évolution des utilisateurs actifs par mois (Connectés + Invités)",
+        labels={"month_start": "Mois", "total_unique_users": "Utilisateurs actifs"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution des utilisateurs actifs mensuels")
+    st.plotly_chart(fig)
+
+
+# ------------------------------------------------------
+# Partie Bug Report User type Tous
+# ------------------------------------------------------
+
+if page == "Bug Report" and user_type == "Tous":
     st.title("Partie Bug Report")
-    # 🔹 Définition de la période actuelle (semaine en cours)
     today = datetime.now()
     current_week_start = (today - timedelta(days=today.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     current_week_end = current_week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
@@ -1738,3 +3754,158 @@ if page == "Bug Report":
         st.dataframe(non_finalized_df)  # Tableau des paniers abandonnés
 
 
+
+# ------------------------------------------------------
+# Partie Bug Report User type Utilisateurs Connectés
+# ------------------------------------------------------
+
+elif page == 'Bug Report' and user_type == 'Utilisateurs Connectés':
+    today = datetime.now()
+    current_week_start = (today - timedelta(days=today.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    current_week_end = current_week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+    user_filter = {}
+    connected_user_ids = users_collection.distinct("_id")
+    connected_user_ids_str = [str(uid) for uid in connected_user_ids]
+    user_filter = {"userId": {"$in": connected_user_ids_str}}
+
+
+    # 🔹 Récupération des paniers abandonnés
+    non_finalized_carts_users = list(orders_collection.find({
+        'isPaid': False,
+        'createdAt': {'$gte': current_week_start, '$lte': current_week_end},
+        'scanItems': {'$exists': True, '$ne': []},
+        **user_filter
+    }))
+
+    # 🔹 Récupération des paniers finalisés
+    finalized_carts_users = list(orders_collection.find({
+        'isPaid': True,
+        'paidAt': {'$gte': current_week_start, '$lte': current_week_end},
+        **user_filter
+    }))
+        # 🔹 Nombre total de paniers abandonnés et finalisés
+    total_non_finalized = len(non_finalized_carts_users)
+    total_finalized = len(finalized_carts_users)
+
+    # 🔹 Mapping des magasins
+    store_mapping = {
+        "65e6388eb6667e3400b5b8d8": "Supermarché Match",
+        "65d3631ff2cd066ab75434fa": "Intermarché Saint Julien",
+        "662bb3234c362c6e79e27020": "Netto Troyes",
+        "64e48f4697303382f745cb11": "Carrefour Contact Buchères",
+        "65ce4e565a9ffc7e5fe298bb": "Carrefour Market Romilly",
+        "65b8bde65a0ef81ff30473bf": "Jils Food",
+        "67a8fef293a9fcb4dec991b4": "Intermarché EXPRESS Clamart"
+    }
+
+    # 🔹 Comptage des paniers abandonnés par magasin
+    non_finalized_counts_users = defaultdict(int)
+    for cart in non_finalized_carts_users:
+        store_id = cart.get('storeId')
+        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        non_finalized_counts_users[store_name] += 1
+
+    # 🔹 Comptage des paniers finalisés par magasin
+    finalized_counts_users = defaultdict(int)
+    for cart in finalized_carts_users:
+        store_id = cart.get('storeId')
+        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        finalized_counts_users[store_name] += 1
+
+    # 🔹 Conversion en DataFrame et tri des résultats
+    non_finalized_df_users = pd.DataFrame(list(non_finalized_counts_users.items()), columns=['Magasin', 'Paniers Abandonnés'])
+    non_finalized_df_users = non_finalized_df_users.sort_values(by='Paniers Abandonnés', ascending=False).reset_index(drop=True)
+
+    finalized_df_users = pd.DataFrame(list(finalized_counts_users.items()), columns=['Magasin', 'Paniers Finalisés'])
+    finalized_df_users = finalized_df_users.sort_values(by='Paniers Finalisés', ascending=False).reset_index(drop=True)
+
+    tab1, tab2 = st.tabs(["✅ Paniers Finalisés", "🛒 Paniers Abandonnés"])
+
+    with tab1:
+        st.subheader("✅ Paniers finalisés de la semaine")
+        st.write(f"Nombre total de paniers finalisés : {total_finalized}")
+        st.dataframe(finalized_df_users)  # Tableau des paniers finalisés
+
+    with tab2:
+        st.subheader("🛒 Paniers abandonnés de la semaine")
+        st.write(f"Nombre total de paniers abandonnés : {total_non_finalized}")
+        st.dataframe(non_finalized_df_users)  # Tableau des paniers abandonnés
+
+# ------------------------------------------------------
+# Partie Bug Report User type Invités
+# ------------------------------------------------------
+
+elif page == 'Bug Report' and user_type == 'Invités':
+    today = datetime.now()
+    current_week_start = (today - timedelta(days=today.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    current_week_end = current_week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+    # 🔹 Récupération des paniers abandonnés (GUEST_)
+    non_finalized_carts_guests = list(orders_collection.find({
+        'isPaid': False,
+        'createdAt': {'$gte': current_week_start, '$lte': current_week_end},
+        'scanItems': {'$exists': True, '$ne': []},
+        'userId': {'$regex': '^GUEST_'}
+    }))
+
+    # 🔹 Récupération des paniers finalisés (userId == null = invité)
+    finalized_carts_guests = list(orders_collection.find({
+        'isPaid': True,
+        'paidAt': {'$gte': current_week_start, '$lte': current_week_end},
+        '$or': [
+            {'userId': None},
+            {'userId': {'$regex': '^GUEST_'}},
+            {'userId': {'$exists': False}}
+        ]
+    }))
+
+
+    # 🔹 Nombre total de paniers abandonnés et finalisés
+    total_non_finalized_guests = len(non_finalized_carts_guests)
+    total_finalized_guests = len(finalized_carts_guests)
+
+    # 🔹 Mapping des magasins
+    store_mapping = {
+        "65e6388eb6667e3400b5b8d8": "Supermarché Match",
+        "65d3631ff2cd066ab75434fa": "Intermarché Saint Julien",
+        "662bb3234c362c6e79e27020": "Netto Troyes",
+        "64e48f4697303382f745cb11": "Carrefour Contact Buchères",
+        "65ce4e565a9ffc7e5fe298bb": "Carrefour Market Romilly",
+        "65b8bde65a0ef81ff30473bf": "Jils Food",
+        "67a8fef293a9fcb4dec991b4": "Intermarché EXPRESS Clamart"
+    }
+
+    # 🔹 Comptage des paniers abandonnés par magasin
+    non_finalized_counts_guests = defaultdict(int)
+    for cart in non_finalized_carts_guests:
+        store_id = cart.get('storeId')
+        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        non_finalized_counts_guests[store_name] += 1
+
+    # 🔹 Comptage des paniers finalisés par magasin
+    finalized_counts_guests = defaultdict(int)
+    for cart in finalized_carts_guests:
+        store_id = cart.get('storeId')
+        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        finalized_counts_guests[store_name] += 1
+
+    # 🔹 Conversion en DataFrame et tri des résultats
+    non_finalized_df_guests = pd.DataFrame(list(non_finalized_counts_guests.items()), columns=['Magasin', 'Paniers Abandonnés'])
+    non_finalized_df_guests = non_finalized_df_guests.sort_values(by='Paniers Abandonnés', ascending=False).reset_index(drop=True)
+
+    finalized_df_guests = pd.DataFrame(list(finalized_counts_guests.items()), columns=['Magasin', 'Paniers Finalisés'])
+    finalized_df_guests = finalized_df_guests.sort_values(by='Paniers Finalisés', ascending=False).reset_index(drop=True)
+
+    # 📌 Affichage Streamlit
+    tab1, tab2 = st.tabs(["✅ Paniers Finalisés", "🛒 Paniers Abandonnés (Invités)"])
+
+    with tab1:
+        st.subheader("✅ Paniers finalisés de la semaine")
+        st.write(f"Nombre total de paniers finalisés : {total_finalized_guests}")
+        st.dataframe(finalized_df_guests)
+
+    with tab2:
+        st.subheader("🛒 Paniers abandonnés de la semaine (Invités)")
+        st.write(f"Nombre total de paniers abandonnés : {total_non_finalized_guests}")
+        st.dataframe(non_finalized_df_guests)
