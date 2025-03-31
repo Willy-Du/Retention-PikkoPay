@@ -49,13 +49,13 @@ payment_mapping = {
     "https://google.com/pay": "Google Pay"
 }
 
-# 📌 Connexion MongoDB
+#  Connexion MongoDB
 client = MongoClient(MONGO_URI)
 db = client['storesDatabase']
 users_collection = db['usertests']
 orders_collection = db['ordertests']
 
-# 📌 Ajout du menu de navigation dans la barre latérale
+#  Ajout du menu de navigation dans la barre latérale
 st.sidebar.title("📊 Dashboard de suivi")
 
 # Sélection du type d'utilisateur
@@ -871,7 +871,7 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
     # On convertit ce dictionnaire en DataFrame
     df_monthly_retention = pd.DataFrame.from_dict(monthly_retention, orient='index')
 
-    # ✅ Correction : Forcer la colonne "+0" à être identique à "total_new_users"
+    # Forcer la colonne "+0" à être identique à "total_new_users"
     df_monthly_retention["+0"] = df_new_users["total_new_users"]
 
     # Fusionner avec df_new_users pour récupérer total_new_users
@@ -913,7 +913,7 @@ elif page == "Rétention" and toggle_view == "Mensuel" and user_type == "Utilisa
         if col_name not in df_final.columns:
             df_final[col_name] = None
 
-    # e) Remplir TOUTES les valeurs manquantes avec 0 pour les périodes passées
+    # e) Remplir toutes les valeurs manquantes avec 0 pour les périodes passées
     for index, row in df_final.iterrows():
         cohort_date = index
         for offset in range(global_max + 1):
@@ -1410,6 +1410,87 @@ if page == "Rétention" and toggle_view == "Hebdomadaire" and user_type == "Invi
 
     st.plotly_chart(fig)
 
+    # 🍰 Layer Cake Chart - Rétention hebdomadaire des invités
+    st.title("🍰 Layer Cake - Rétention Invités (Hebdomadaire)")
+
+    if df_numeric_week.empty:
+        st.warning("❌ Aucune donnée disponible pour le Layer Cake.")
+    else:
+        df_layer_cake = df_numeric_week.copy().fillna(0)
+
+        # Supprimer la colonne "total_new_users" si elle existe
+        if "total_new_users" in df_layer_cake.columns:
+            df_layer_cake = df_layer_cake.drop(columns=["total_new_users"])
+
+        # Garder les colonnes de type "+0", "+1", ...
+        retention_cols = [col for col in df_layer_cake.columns if col.startswith("+")]
+        retention_cols = sorted(retention_cols, key=lambda c: int(c.replace("+", "")))
+        df_layer_cake = df_layer_cake[retention_cols]
+
+        df_layer_cake.sort_index(ascending=True, inplace=True)
+
+        num_weeks = len(retention_cols)
+        x_axis = np.arange(num_weeks)
+
+        fig = go.Figure()
+        num_cohorts = len(df_layer_cake)
+        colormap = cm.get_cmap('tab20c', num_cohorts)
+
+        stacked_matrix = np.full((num_cohorts, num_weeks), np.nan)
+
+        for i, row in enumerate(df_layer_cake.itertuples(index=False)):
+            values = np.array(row)
+            shifted = [np.nan] * i + list(values[:num_weeks - i])
+            stacked_matrix[i, :len(shifted)] = shifted
+
+        for i, (cohort_date, row) in enumerate(df_layer_cake.iterrows()):
+            cohort_values = np.array(row.tolist(), dtype=float)
+            shifted = [None] * i + list(cohort_values[:num_weeks - i])
+            customdata = []
+            for j in range(num_weeks):
+                if j < i:
+                    customdata.append(None)
+                else:
+                    total = np.nansum(stacked_matrix[:i+1, j])
+                    customdata.append(total)
+
+            rgba = colormap(i / num_cohorts)
+            color = f"rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})"
+
+            fig.add_trace(go.Scatter(
+                x=x_axis,
+                y=shifted,
+                mode='lines',
+                stackgroup='one',
+                name=f"Cohorte {cohort_date.strftime('%Y-%m-%d')}",
+                line=dict(color=color),
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>Cohorte</b> : %{fullData.name}<br>" +
+                    "<b>Semaine</b> : %{x}<br>" +
+                    "<b>Utilisateurs de la cohorte</b> : %{y:.0f}<br>" +
+                    "<b>Total empilé</b> : %{customdata:.0f}" +
+                    "<extra></extra>"
+                )
+            ))
+
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=list(x_axis),
+            ticktext=[f"+{i}" for i in x_axis]
+        )
+
+        fig.update_layout(
+            title="📊 Layer Cake Chart - Rétention des invités",
+            xaxis_title="Semaines après premier achat",
+            yaxis_title="Nombre d'utilisateurs cumulés",
+            template="plotly_white",
+            legend_title="Cohortes hebdomadaires",
+        )
+
+        st.plotly_chart(fig)
+
+
 
 # ------------------------------------------------------
 # Partie Rétention Mensuel Invités 
@@ -1637,6 +1718,86 @@ if page == "Rétention" and toggle_view == "Mensuel" and user_type == "Invités"
     )
 
     st.plotly_chart(fig)
+
+    # 🍰 Layer Cake Chart - Rétention mensuelle des invités
+    st.title("🍰 Layer Cake - Rétention Invités (Mensuel)")
+
+    if df_numeric_month.empty:
+        st.warning("❌ Aucune donnée disponible pour générer le Layer Cake.")
+    else:
+        df_layer_cake = df_numeric_month.copy().fillna(0)
+
+        # Supprimer la colonne "total_new_users" si elle existe
+        if "total_new_users" in df_layer_cake.columns:
+            df_layer_cake = df_layer_cake.drop(columns=["total_new_users"])
+
+        # Récupérer et trier les colonnes "+0", "+1", ...
+        retention_cols = [col for col in df_layer_cake.columns if col.startswith("+")]
+        retention_cols = sorted(retention_cols, key=lambda c: int(c.replace("+", "")))
+        df_layer_cake = df_layer_cake[retention_cols]
+        df_layer_cake.sort_index(ascending=True, inplace=True)
+
+        num_months = len(retention_cols)
+        x_axis = np.arange(num_months)
+
+        fig = go.Figure()
+        num_cohorts = len(df_layer_cake)
+        colormap = cm.get_cmap('tab20c', num_cohorts)
+
+        stacked_matrix = np.full((num_cohorts, num_months), np.nan)
+
+        for i, row in enumerate(df_layer_cake.itertuples(index=False)):
+            values = np.array(row)
+            shifted = [np.nan] * i + list(values[:num_months - i])
+            stacked_matrix[i, :len(shifted)] = shifted
+
+        for i, (cohort_date, row) in enumerate(df_layer_cake.iterrows()):
+            cohort_values = np.array(row.tolist(), dtype=float)
+            shifted = [None] * i + list(cohort_values[:num_months - i])
+            customdata = []
+            for j in range(num_months):
+                if j < i:
+                    customdata.append(None)
+                else:
+                    total = np.nansum(stacked_matrix[:i+1, j])
+                    customdata.append(total)
+
+            rgba = colormap(i / num_cohorts)
+            color = f"rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})"
+
+            fig.add_trace(go.Scatter(
+                x=x_axis,
+                y=shifted,
+                mode='lines',
+                stackgroup='one',
+                name=f"Cohorte {cohort_date.strftime('%Y-%m')}",
+                line=dict(color=color),
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>Cohorte</b> : %{fullData.name}<br>" +
+                    "<b>Mois</b> : +%{x}<br>" +
+                    "<b>Utilisateurs de la cohorte</b> : %{y:.0f}<br>" +
+                    "<b>Total empilé</b> : %{customdata:.0f}" +
+                    "<extra></extra>"
+                )
+            ))
+
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=list(x_axis),
+            ticktext=[f"+{i}" for i in x_axis]
+        )
+
+        fig.update_layout(
+            title="📊 Layer Cake Chart - Rétention mensuelle des invités (valeurs absolues)",
+            xaxis_title="Mois après premier achat",
+            yaxis_title="Utilisateurs cumulés",
+            template="plotly_white",
+            legend_title="Cohortes mensuelles"
+        )
+
+        st.plotly_chart(fig)
+
 
 # ------------------------------------------------------
 # Partie Rétention Hebdomadaire Tous
@@ -2662,152 +2823,6 @@ elif page == "Acquisition" and toggle_view == "Hebdomadaire" and user_type == "I
     )
 
     st.subheader("📈 Évolution des nouveaux invités par semaine")
-    st.plotly_chart(fig)
-
-
-
-    current_date = datetime.now()
-    current_week_start = datetime.fromisocalendar(current_date.year, current_date.isocalendar()[1], 1)
-
-    # Générer la plage complète de semaines, en excluant la semaine actuelle
-    all_weeks_range = pd.date_range(start=date_start, end=current_week_start - timedelta(days=1), freq='W-MON')
-
-    # Filtrer les nouvelles cohortes avant la semaine en cours
-    filtered_combined_new_users = combined_new_users_week[combined_new_users_week.index < current_week_start]
-    all_cohort_dates = set(all_weeks_range) | set(filtered_combined_new_users.index)
-
-    # Initialiser le dictionnaire de rétention
-    week_retention = {idx: {"+0": 0} for idx in all_cohort_dates}
-
-    # Calcul +0 et intersections
-    for index, row in filtered_combined_new_users.iterrows():
-        new_user_set = row['new_users']
-        week_retention[index]["+0"] = len(new_user_set)
-        if not new_user_set:
-            continue
-
-        future_weeks = combined_active_users_week.loc[
-            (combined_active_users_week.index > index) &
-            (combined_active_users_week.index < current_week_start)
-        ]
-
-        for future_index, future_row in future_weeks.iterrows():
-            week_diff = (future_index - index).days // 7
-            retained_users = len(new_user_set.intersection(future_row['active_users']))
-            week_retention[index][f"+{week_diff}"] = retained_users
-
-    # Convertir en DataFrame
-    df_retention_week = pd.DataFrame.from_dict(week_retention, orient='index')
-
-    # Compléter les colonnes manquantes
-    global_max = max((current_week_start - timedelta(days=7) - idx).days // 7 for idx in df_retention_week.index)
-
-    for index, row in df_retention_week.iterrows():
-        for week_diff in range(global_max + 1):
-            col_name = f"+{week_diff}"
-            future_week = index + timedelta(weeks=week_diff)
-            if future_week >= current_week_start:
-                df_retention_week.at[index, col_name] = None
-            elif pd.isna(row.get(col_name, None)):
-                df_retention_week.at[index, col_name] = 0
-
-    # 🧮 Total nouveaux utilisateurs par semaine
-    all_weeks_df = pd.DataFrame(index=sorted(all_cohort_dates))
-    all_weeks_df['total_new_users'] = 0
-    for idx in filtered_combined_new_users.index:
-        if idx in all_weeks_df.index:
-            all_weeks_df.loc[idx, 'total_new_users'] = len(filtered_combined_new_users.loc[idx, 'new_users'])
-
-    # Fusion avec la rétention
-    df_numeric_week = all_weeks_df.merge(df_retention_week, left_index=True, right_index=True, how='left')
-
-    # Organisation colonnes
-    retention_cols = sorted([col for col in df_numeric_week.columns if col.startswith("+")],
-                            key=lambda x: int(x.replace("+", "")))
-    other_cols = [col for col in df_numeric_week.columns if not col.startswith("+")]
-    df_numeric_week = df_numeric_week[other_cols + retention_cols]
-
-    # Pourcentage
-    df_percentage_week = df_numeric_week.copy()
-    for col in df_percentage_week.columns:
-        if col.startswith("+") and col != "+0":
-            mask = (df_percentage_week["+0"] > 0) & (df_percentage_week[col].notna())
-            df_percentage_week.loc[mask, col] = (
-                df_percentage_week.loc[mask, col] / df_percentage_week.loc[mask, "+0"] * 100
-            ).round(1)
-    df_percentage_week["+0"] = df_percentage_week["+0"].apply(lambda x: 100 if x > 0 else 0)
-
-    # Gradient style
-    def apply_red_gradient_with_future(val):
-        if pd.isna(val):
-            return 'background-color: #f0f0f0; color: #f0f0f0;'
-        elif pd.notna(val):
-            intensity = int(255 * ((1 - val / 100) ** 3))
-            return f'background-color: rgba(255, {intensity}, {intensity}, 1); color: black;'
-        return ''
-
-    # 🔎 AFFICHAGE TABLEAUX
-    st.header("📅 Tableau des cohortes hebdomadaires - Tous (valeurs)")
-    st.dataframe(df_numeric_week)
-
-    st.subheader("📊 Tableau des cohortes hebdomadaires - Tous (%)")
-    st.dataframe(
-        df_percentage_week.style.applymap(
-            apply_red_gradient_with_future,
-            subset=[col for col in df_percentage_week.columns if col.startswith("+")]
-        )
-    )
-
-    # 📈 COURBE DE RÉTENTION
-    st.subheader("📈 Courbe de rétention hebdomadaire - Tous")
-
-    df_plot = df_percentage_week.copy()
-    fig = go.Figure()
-    colormap = cm.get_cmap('tab20c', len(df_plot))
-
-    for i, (idx, row) in enumerate(df_plot.iterrows()):
-        valid_values = row[[col for col in row.index if col.startswith("+")]].dropna()
-        if "+0" not in valid_values.index:
-            continue
-        rgba = colormap(i / len(df_plot))
-        color = f'rgba({int(rgba[0]*255)},{int(rgba[1]*255)},{int(rgba[2]*255)},{rgba[3]})'
-        fig.add_trace(go.Scatter(
-            x=valid_values.index,
-            y=valid_values.values,
-            mode='lines',
-            name=f"Cohorte {idx.strftime('%Y-%m-%d')}",
-            line=dict(width=2, color=color),
-            hoverinfo='x+y',
-            opacity=0.8
-        ))
-
-    # Moyenne
-    average_curve = df_plot[[col for col in df_plot.columns if col.startswith("+")]].mean(axis=0, skipna=True)
-    fig.add_trace(go.Scatter(
-        x=average_curve.index,
-        y=average_curve.values,
-        mode='lines',
-        name='Moyenne par +x',
-        line=dict(width=3, color='black'),
-        opacity=1.0
-    ))
-
-    fig.update_layout(
-        title="📊 Rétention hebdomadaire (%) - Utilisateurs Connectés + Invités",
-        xaxis_title="Semaine après le premier achat",
-        yaxis_title="Pourcentage de rétention",
-        template="plotly_white",
-        xaxis=dict(
-            tickmode='array',
-            tickvals=[f'+{i}' for i in range(len(average_curve))]
-        ),
-        yaxis=dict(
-            tickformat=".1f",
-            range=[0, 110]
-        ),
-        height=500
-    )
-
     st.plotly_chart(fig)
 
 
