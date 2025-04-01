@@ -74,7 +74,12 @@ displayed_store_id = st.sidebar.selectbox(
 
 date_end = datetime.now()
 date_start = store_mapping[displayed_store_id]["launch_date"]
-store_filter = ObjectId(displayed_store_id)
+# Vérifie si le storeId dans MongoDB est un ObjectId ou une string
+sample_doc = orders_collection.find_one({"storeId": {"$exists": True}}, {"storeId": 1})
+mongo_store_type = type(sample_doc["storeId"]) if sample_doc and "storeId" in sample_doc else str
+
+# Convertir displayed_store_id uniquement si nécessaire
+store_filter = ObjectId(displayed_store_id) if mongo_store_type is ObjectId else displayed_store_id
 
 unique_payments = st.session_state.users_collection.distinct(
     "receipt.paymentMethod",
