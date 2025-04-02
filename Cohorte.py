@@ -3047,6 +3047,112 @@ elif page == "Acquisition" and toggle_view == "Hebdomadaire" and user_type == "T
     st.subheader("📈 Évolution hebdomadaire des nouveaux utilisateurs")
     st.plotly_chart(fig)
 
+elif page == "Acquisition" and toggle_view == "Mensuel" and user_type == "Tous":
+    st.title("Partie Acquisition - Tous les Utilisateurs (Mensuel)")
+
+    # 📌 Pipeline utilisateurs connectés (par mois)
+    pipeline_new_users_per_month = [
+        {"$match": {
+            "createdAt": {"$gte": date_start, "$lte": date_end}
+        }},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$createdAt"},
+                "month": {"$month": "$createdAt"}
+            },
+            "new_users": {"$sum": 1}
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}}
+    ]
+
+    data_new_users_per_month = list(users_collection.aggregate(pipeline_new_users_per_month))
+    df_new_users_per_month = pd.DataFrame(data_new_users_per_month)
+    df_new_users_per_month['year'] = df_new_users_per_month['_id'].apply(lambda x: x['year'])
+    df_new_users_per_month['month'] = df_new_users_per_month['_id'].apply(lambda x: x['month'])
+    df_new_users_per_month['month_start'] = df_new_users_per_month.apply(
+        lambda x: datetime(x['year'], x['month'], 1), axis=1
+    )
+    df_new_users_per_month = df_new_users_per_month.sort_values(by='month_start').set_index('month_start')
+
+    # 📌 Pipeline invités (par mois)
+    pipeline_new_guests_per_month = [
+        {
+            "$match": {
+                "createdAt": {"$gte": date_start, "$lte": date_end},
+                "$or": [
+                    {"userId": None},
+                    {"userId": {"$regex": "^GUEST_"}}
+                ]
+            }
+        },
+        {
+            "$addFields": {
+                "guestKey": {
+                    "$cond": [
+                        { "$eq": ["$userId", None] },
+                        { "$toString": "$_id" },
+                        "$userId"
+                    ]
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "year": { "$year": "$createdAt" },
+                    "month": { "$month": "$createdAt" }
+                },
+                "guests": { "$addToSet": "$guestKey" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "guest_count": { "$size": "$guests" }
+            }
+        },
+        { "$sort": { "_id.year": 1, "_id.month": 1 } }
+    ]
+
+    data_new_guests_per_month = list(orders_collection.aggregate(pipeline_new_guests_per_month))
+    df_new_guests_per_month = pd.DataFrame(data_new_guests_per_month)
+    df_new_guests_per_month['year'] = df_new_guests_per_month['_id'].apply(lambda x: x['year'])
+    df_new_guests_per_month['month'] = df_new_guests_per_month['_id'].apply(lambda x: x['month'])
+    df_new_guests_per_month['month_start'] = df_new_guests_per_month.apply(
+        lambda x: datetime(x['year'], x['month'], 1), axis=1
+    )
+    df_new_guests_per_month = df_new_guests_per_month.sort_values(by='month_start').set_index('month_start')
+
+    # 📌 Exclure le mois en cours
+    today = datetime.now()
+    current_month_start = datetime(today.year, today.month, 1)
+    df_new_users_per_month = df_new_users_per_month[df_new_users_per_month.index < current_month_start]
+    df_new_guests_per_month = df_new_guests_per_month[df_new_guests_per_month.index < current_month_start]
+
+    # 📌 Fusionner les deux DataFrames
+    df_total_users_per_month = pd.DataFrame(index=df_new_users_per_month.index.union(df_new_guests_per_month.index))
+    df_total_users_per_month['connectés'] = df_new_users_per_month['new_users']
+    df_total_users_per_month['invités'] = df_new_guests_per_month['guest_count']
+    df_total_users_per_month = df_total_users_per_month.fillna(0)
+    df_total_users_per_month['total'] = df_total_users_per_month['connectés'] + df_total_users_per_month['invités']
+
+    # 📌 Affichage tableau
+    st.subheader("📅 Nombre total de nouveaux utilisateurs (connectés + invités) par mois")
+    st.dataframe(df_total_users_per_month[['connectés', 'invités', 'total']])
+
+    # 📈 Courbe Plotly
+    fig = px.line(
+        df_total_users_per_month,
+        x=df_total_users_per_month.index,
+        y=['connectés', 'invités', 'total'],
+        title="📈 Évolution mensuelle de l'acquisition (tous utilisateurs)",
+        labels={"value": "Utilisateurs", "variable": "Type"},
+        markers=True
+    )
+
+    st.subheader("📈 Évolution mensuelle des nouveaux utilisateurs")
+    st.plotly_chart(fig)
+
 
 
 # ------------------------------------------------------
@@ -3784,11 +3890,11 @@ elif page == 'Bug Report' and user_type == 'Utilisateurs Connectés':
     current_week_start = (today - timedelta(days=today.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     current_week_end = current_week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
-    user_filter = {}
-    connected_user_ids = users_collection.distinct("_id")
-    connected_user_ids_str = [str(uid) for uid in connected_user_ids]
-    user_filter = {"userId": {"$in": connected_user_ids_str}}
-
+    # 🔹 Filtre des utilisateurs connectés via la collection orders
+    user_filter = {
+        "userId": {"$exists": True, "$nin": [None, ""]},
+        "userId": {"$not": {"$regex": "^GUEST_", "$options": "i"}}
+    }
 
     # 🔹 Récupération des paniers abandonnés
     non_finalized_carts_users = list(orders_collection.find({
@@ -3804,7 +3910,8 @@ elif page == 'Bug Report' and user_type == 'Utilisateurs Connectés':
         'paidAt': {'$gte': current_week_start, '$lte': current_week_end},
         **user_filter
     }))
-        # 🔹 Nombre total de paniers abandonnés et finalisés
+
+    # 🔹 Nombre total de paniers
     total_non_finalized = len(non_finalized_carts_users)
     total_finalized = len(finalized_carts_users)
 
@@ -3819,38 +3926,39 @@ elif page == 'Bug Report' and user_type == 'Utilisateurs Connectés':
         "67a8fef293a9fcb4dec991b4": "Intermarché EXPRESS Clamart"
     }
 
-    # 🔹 Comptage des paniers abandonnés par magasin
+    # 🔹 Comptage par magasin
     non_finalized_counts_users = defaultdict(int)
     for cart in non_finalized_carts_users:
         store_id = cart.get('storeId')
-        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        store_name = store_mapping.get(str(store_id), "Inconnu")
         non_finalized_counts_users[store_name] += 1
 
-    # 🔹 Comptage des paniers finalisés par magasin
     finalized_counts_users = defaultdict(int)
     for cart in finalized_carts_users:
         store_id = cart.get('storeId')
-        store_name = store_mapping.get(str(store_id), "Inconnu") 
+        store_name = store_mapping.get(str(store_id), "Inconnu")
         finalized_counts_users[store_name] += 1
 
-    # 🔹 Conversion en DataFrame et tri des résultats
+    # 🔹 Conversion en DataFrame
     non_finalized_df_users = pd.DataFrame(list(non_finalized_counts_users.items()), columns=['Magasin', 'Paniers Abandonnés'])
     non_finalized_df_users = non_finalized_df_users.sort_values(by='Paniers Abandonnés', ascending=False).reset_index(drop=True)
 
     finalized_df_users = pd.DataFrame(list(finalized_counts_users.items()), columns=['Magasin', 'Paniers Finalisés'])
     finalized_df_users = finalized_df_users.sort_values(by='Paniers Finalisés', ascending=False).reset_index(drop=True)
 
+    # 🔹 Affichage Streamlit
     tab1, tab2 = st.tabs(["✅ Paniers Finalisés", "🛒 Paniers Abandonnés"])
 
     with tab1:
         st.subheader("✅ Paniers finalisés de la semaine")
         st.write(f"Nombre total de paniers finalisés : {total_finalized}")
-        st.dataframe(finalized_df_users)  # Tableau des paniers finalisés
+        st.dataframe(finalized_df_users)
 
     with tab2:
         st.subheader("🛒 Paniers abandonnés de la semaine")
         st.write(f"Nombre total de paniers abandonnés : {total_non_finalized}")
-        st.dataframe(non_finalized_df_users)  # Tableau des paniers abandonnés
+        st.dataframe(non_finalized_df_users)
+
 
 # ------------------------------------------------------
 # Partie Bug Report User type Invités
